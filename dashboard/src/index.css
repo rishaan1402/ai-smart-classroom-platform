@@ -10,3 +10,30 @@ body {
 #root {
   min-height: 100vh;
 }
+
+/*
+ * Chart tokens (dataviz reference palette, dark steps; validated on this
+ * dashboard's #0f172a surface: CVD ΔE ≥ 8.4 adjacent, contrast ≥ 3:1).
+ * Series slots are assigned in fixed order by student state, never cycled.
+ */
+:root {
+  --viz-surface: #0f172a;
+  --viz-grid: #1e293b;
+  --viz-axis: #475569;
+  --viz-text-primary: #f1f5f9;
+  --viz-text-secondary: #94a3b8;
+  --viz-series-1: #3987e5;   /* attentive / main series */
+  --viz-series-2: #d95926;   /* writing */
+  --viz-series-3: #199e70;   /* hand raised */
+  --viz-series-4: #c98500;   /* head down */
+  --viz-series-5: #d55181;   /* turned away */
+  --viz-other: #64748b;      /* folded "other" states */
+  --viz-band-a: rgba(148, 163, 184, 0.06);
+  --viz-band-b: rgba(148, 163, 184, 0.13);
+  /* Sequential blue for magnitude (engaged share), low → high on dark */
+  --viz-seq-0: #184f95;
+  --viz-seq-1: #256abf;
+  --viz-seq-2: #3987e5;
+  --viz-seq-3: #6da7ec;
+  --viz-seq-4: #9ec5f4;
+}

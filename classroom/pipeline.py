@@ -34,6 +34,7 @@ import argparse
 import json
 import logging
 import pickle
+import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
@@ -304,12 +305,13 @@ def write_preview(
     detector finds (catches people the person detector missed).
     """
     blurrer = FaceBlurrer()
+    raw_path = out_path.with_suffix(".raw.mp4")
     by_frame: dict[int, list[ClassroomToken]] = {}
     for t in tokens:
         by_frame.setdefault(t.frame_idx, []).append(t)
 
     cap = cv2.VideoCapture(str(video))
-    writer = cv2.VideoWriter(str(out_path), cv2.VideoWriter_fourcc(*"mp4v"), fps, (frames[0].width, frames[0].height))
+    writer = cv2.VideoWriter(str(raw_path), cv2.VideoWriter_fourcc(*"mp4v"), fps, (frames[0].width, frames[0].height))
     for det in frames:
         cap.set(cv2.CAP_PROP_POS_FRAMES, det.frame_idx)
         ok, frame = cap.read()
@@ -342,6 +344,17 @@ def write_preview(
         writer.write(frame)
     writer.release()
     cap.release()
+    to_browser_mp4(raw_path, out_path)
+
+
+def to_browser_mp4(src: Path, dst: Path) -> None:
+    """Re-encode OpenCV's mp4v output as H.264 + faststart so browsers can play and seek it."""
+    subprocess.run(
+        ["ffmpeg", "-v", "error", "-y", "-i", str(src), "-c:v", "libx264", "-preset", "veryfast", "-crf", "26",
+         "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(dst)],
+        check=True,
+    )
+    src.unlink()
 
 
 def identify_seats(args, frames: list[FrameDetections], tokens: list[ClassroomToken], seatmap: SeatMap) -> dict[str, str]:

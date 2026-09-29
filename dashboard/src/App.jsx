@@ -5,6 +5,9 @@ import EventsPage from './pages/EventsPage'
 import CamerasPage from './pages/CamerasPage'
 import HealthPage from './pages/HealthPage'
 import PlaybackPage from './pages/PlaybackPage'
+import LessonsPage from './pages/LessonsPage'
+import LessonPage from './pages/LessonPage'
+import StudentPage from './pages/StudentPage'
 import Layout from './components/Layout'
 
 function RequireAuth({ children }) {
@@ -25,7 +28,10 @@ export default function App() {
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/" element={<RequireAuth><Layout /></RequireAuth>}>
-            <Route index element={<Navigate to="/events" replace />} />
+            <Route index element={<Navigate to="/lessons" replace />} />
+            <Route path="lessons" element={<LessonsPage />} />
+            <Route path="lessons/:id" element={<LessonPage />} />
+            <Route path="students/:id" element={<StudentPage />} />
             <Route path="events" element={<EventsPage />} />
             <Route path="cameras" element={<CamerasPage />} />
             <Route path="playback" element={<PlaybackPage />} />

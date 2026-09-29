@@ -56,4 +56,11 @@ export const api = {
 
   // Health
   health: () => request('GET', '/health'),
+
+  // Classroom analytics
+  lessons: () => request('GET', '/lessons'),
+  lesson: (id) => request('GET', `/lessons/${encodeURIComponent(id)}`),
+  seats: (id) => request('GET', `/lessons/${encodeURIComponent(id)}/seats`),
+  previewUrl: (id) => `${BASE}/lessons/${encodeURIComponent(id)}/preview`,
+  student: (id) => request('GET', `/students/${encodeURIComponent(id)}`),
 }

@@ -17,7 +17,7 @@ from .database import ApiSession
 from .middleware.rate_limit import limiter
 from .middleware.tenant import TenantMiddleware
 from .models import Tenant
-from .routes import auth_routes, cameras, events, health, onvif, playback, ws
+from .routes import auth_routes, cameras, events, health, lessons, onvif, playback, ws
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +51,7 @@ app.include_router(cameras.router)
 app.include_router(onvif.router)
 app.include_router(playback.router)
 app.include_router(ws.router)
+app.include_router(lessons.router)
 
 
 @app.on_event("startup")

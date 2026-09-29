@@ -1,8 +1,9 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAuth } from '../AuthContext'
-import { Activity, Camera, Film, LogOut, Shield, Wifi } from 'lucide-react'
+import { Activity, BookOpen, Camera, Film, GraduationCap, LogOut, Wifi } from 'lucide-react'
 
 const nav = [
+  { to: '/lessons', icon: BookOpen, label: 'Lessons' },
   { to: '/events', icon: Activity, label: 'Events' },
   { to: '/cameras', icon: Camera, label: 'Cameras' },
   { to: '/playback', icon: Film, label: 'Playback' },
@@ -23,8 +24,8 @@ export default function Layout() {
       {/* Sidebar */}
       <aside className="w-56 bg-slate-900 border-r border-slate-800 flex flex-col">
         <div className="p-4 border-b border-slate-800 flex items-center gap-2">
-          <Shield className="text-blue-400" size={20} />
-          <span className="font-semibold text-white">SentinelCore</span>
+          <GraduationCap className="text-blue-400" size={20} />
+          <span className="font-semibold text-white">Smart Classroom</span>
         </div>
 
         <nav className="flex-1 p-3 space-y-1">
