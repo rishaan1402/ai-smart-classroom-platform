@@ -1,0 +1,8 @@
+[
+  {
+    "id": "cam_webcam",
+    "name": "Webcam (test)",
+    "rtsp_url": "webcam://0",
+    "enabled": true
+  }
+]

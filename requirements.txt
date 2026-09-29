@@ -1,0 +1,57 @@
+# SentinelCore — AI Surveillance Platform
+
+# --- Engine: Core ML ---
+torch>=2.1.0
+ultralytics>=8.1.0
+opencv-python-headless>=4.8.0
+numpy>=1.24.0
+
+# --- Engine: Messaging / Config ---
+redis>=5.0.0
+pyyaml>=6.0
+
+# --- Engine: Storage ---
+minio>=7.2.0
+
+# --- Engine: Security ---
+cryptography>=41.0.0
+
+# --- Engine: LLM/VLM (Ollama HTTP API) ---
+requests>=2.31.0
+
+# --- Engine: Face Recognition ---
+insightface>=0.7.3
+faiss-cpu>=1.7.4
+onnxruntime>=1.16.0
+
+# --- API: FastAPI ---
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6
+pydantic>=2.5.0
+
+# --- API: Database ---
+sqlalchemy>=2.0.0
+alembic>=1.13.0
+psycopg2-binary>=2.9.0
+
+# --- API: Auth ---
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+
+# --- API: Rate Limiting ---
+slowapi>=0.1.9
+
+# --- API: Monitoring ---
+prometheus-client>=0.19.0
+
+# --- Classroom analytics (offline pipeline) ---
+pandas>=2.2.0
+pyarrow>=16.0.0
+lap>=0.5.12
+scipy>=1.11.0
+
+# --- Audio (teacher ASR + room noise) ---
+faster-whisper>=1.2.0
+noisereduce>=3.0.0
+jiwer>=3.0.0

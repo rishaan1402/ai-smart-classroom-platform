@@ -1,0 +1,9 @@
+[
+  {
+    "id": "zone_entrance",
+    "name": "Main Entrance",
+    "type": "restricted",
+    "polygon": [[0.1, 0.1], [0.4, 0.1], [0.4, 0.5], [0.1, 0.5]],
+    "rules": ["authorized_only"]
+  }
+]

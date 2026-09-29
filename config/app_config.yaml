@@ -1,0 +1,89 @@
+# SentinelCore Configuration
+# Values here override DEFAULT_CONFIG in sentinel_engine/config.py
+
+# --- Device ---
+# Auto-detected: cuda > mps > cpu
+# device: cuda
+
+# --- YOLO ---
+yolo_model: yolo11n-pose.pt
+target_fps: 15
+tracker_config: botsort.yaml
+
+# --- Workers ---
+num_llm_workers: 1   # using llava-phi3 for text triage; switch llm_model to qwen3:1.7b once pulled
+num_vlm_workers: 1   # llava-phi3 for visual analysis
+num_face_workers: 0
+num_log_workers: 1
+
+# --- Face Recognition ---
+face_enabled: false
+face_min_crop_px: 64
+face_check_cooldown_s: 10.0
+face_match_threshold: 0.55
+
+# --- Ollama ---
+ollama_url: http://localhost:11434
+llm_model: llava-phi3:latest   # switch to qwen3:1.7b once pulled
+vlm_model: llava-phi3:latest
+llm_timeout_s: 10
+vlm_timeout_s: 15
+
+# --- Redis ---
+redis_host: localhost
+redis_port: 6379
+# redis_password: (set in .env)
+redis_db: 0
+
+# --- Storage ---
+storage_backend: local
+local_storage_path: data/storage
+
+# --- Gatekeeper ---
+fall_frames: 3
+running_velocity: 4.0
+loiter_seconds: 120
+zone_intrusion_frames: 5
+hands_raised_frames: 5
+
+# --- Event cooldowns (seconds between repeat events per person) ---
+cooldowns:
+  FALL_DETECTED: 30.0
+  RUNNING_IN_ZONE: 15.0
+  HANDS_RAISED: 10.0
+  AGGRESSIVE_BEHAVIOR: 30.0
+  UNKNOWN_PERSON: 120.0
+  LOITERING: 120.0
+  ZONE_INTRUSION: 60.0
+
+# --- Notifications ---
+notification_cooldown_s: 300
+
+# --- Clip Encoding ---
+checkpoint_dir: data/ring_buffer_checkpoint
+
+# --- Scene Auto-Calibration ---
+# VLM analyzes the camera scene on first startup and adjusts thresholds.
+# Cached for 24h in data/calibration/{camera_id}.json
+# Set to false to use manual thresholds only.
+scene_calibration_enabled: true
+calibration_cache_dir: data/calibration
+
+# --- Canary ---
+canary_frame_path: tests/fixtures/canary_frame.jpg
+canary_interval_s: 300
+canary_min_confidence: 0.5
+
+# --- StreamTrimmer ---
+stream_trim_interval_s: 5
+stale_pending_threshold_s: 300
+
+# --- Tenant ---
+tenant_id: default
+
+# --- Cameras ---
+cameras_config: config/cameras.json
+zones_config: config/zones.json
+
+# --- Backpressure ---
+backpressure_xlen_threshold: 40000
