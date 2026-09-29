@@ -95,7 +95,9 @@ class FaceIndex:
             return
         self._lock.acquire_write()
         try:
-            vec = embedding.astype(np.float32).reshape(1, -1)
+            # Normalize like search() and rebuild_from_embeddings(): the L2 → cosine
+            # conversion in search() is only valid for unit vectors
+            vec = self._normalize(embedding).astype(np.float32).reshape(1, -1)
             self._index.add(vec)
             self._id_map.append(face_id)
             self._name_map[face_id] = name

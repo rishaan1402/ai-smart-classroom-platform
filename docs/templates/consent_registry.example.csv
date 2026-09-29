@@ -1,0 +1,5 @@
+student_id,name,section,status,purposes,verified_by,verified_on
+S0001,Example Student A,8A,granted,engagement;exam,signed guardian form,2026-09-01
+S0002,Example Student B,8A,granted,exam,signed guardian form,2026-09-01
+S0003,Example Student C,8A,pending,,,
+S0004,Example Student D,8A,withdrawn,,signed withdrawal,2026-09-15

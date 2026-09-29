@@ -15,10 +15,16 @@ Outputs in --out:
   class_engagement.csv      per second: students seen, engaged share, state shares
   seatmap.json              learned or loaded seat map
   summary.json              run stats and state distribution
-  preview.mp4 (--preview)   annotated video: seat ids + state colours
+  seat_identity.json        seat → consented student (or anonymous), with evidence
+  preview.mp4 (--preview)   annotated video: seat ids + state colours; every head
+                            not identified as a consented student is blurred
   detections.pkl            pass-1 cache, reused when video + perception settings match
 
-Anonymous by design: no face crops, embeddings or identities are produced.
+Identity is consent-gated (classroom/consent.py, classroom/identity.py): seats
+are linked to students only when the consent registry allows the purpose and
+the student is enrolled in the encrypted gallery or listed on the seating
+chart. With no consented enrollments, the run stays fully anonymous and no face
+is ever embedded.
 
 Usage:
   .venv/bin/python -m classroom.pipeline --video footage/cctv_securus_2mp_audio.mp4 --preview
@@ -40,7 +46,11 @@ import pandas as pd
 
 from sentinel_engine.device import detect_device
 
+from .consent import AuditLog, ConsentRegistry
 from .headpose import shoulder_anchor, shoulder_width
+from .identity import (
+    FaceBlurrer, Gallery, SeatIdentifier, blur_heads, head_box, load_seating_chart, outside_all, save_identities,
+)
 from .seatmap import SeatMap, SeatTracker
 from .states import ClassifierConfig, PersonObs, StateClassifier, TemporalSmoother
 from .tokens import ENGAGED_STATES, ClassroomToken, Role, StudentState
@@ -260,9 +270,40 @@ def aggregate(tokens_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     return seat_timeline, class_engagement
 
 
+def run_identification(
+    video: Path, frames: list[FrameDetections], tokens: list[ClassroomToken], identifier: SeatIdentifier,
+    every_n: int,
+) -> None:
+    """Feed each seated student's head region to the identifier, every `every_n` sampled frames."""
+    seat_of = {(t.frame_idx, t.track_id): t.seat_id for t in tokens if t.seat_id}
+    cap = cv2.VideoCapture(str(video))
+    for det in frames[::every_n]:
+        targets = [
+            (seat_of[(det.frame_idx, tid)], head_box(kps, bbox))
+            for tid, bbox, kps in zip(det.track_ids, det.bboxes, det.keypoints)
+            if (det.frame_idx, tid) in seat_of
+        ]
+        if not targets:
+            continue
+        cap.set(cv2.CAP_PROP_POS_FRAMES, det.frame_idx)
+        ok, frame = cap.read()
+        if not ok:
+            break
+        for seat_id, head in targets:
+            identifier.observe(frame, seat_id, head)
+    cap.release()
+
+
 def write_preview(
     video: Path, out_path: Path, frames: list[FrameDetections], tokens: list[ClassroomToken], fps: float,
+    seat_students: dict[str, str],
 ) -> None:
+    """
+    Annotated video. Every head not identified as a consented student is blurred:
+    tracked people via their pose head box, plus any face the whole-frame face
+    detector finds (catches people the person detector missed).
+    """
+    blurrer = FaceBlurrer()
     by_frame: dict[int, list[ClassroomToken]] = {}
     for t in tokens:
         by_frame.setdefault(t.frame_idx, []).append(t)
@@ -274,13 +315,18 @@ def write_preview(
         ok, frame = cap.read()
         if not ok:
             break
+        identified = {t.track_id for t in by_frame.get(det.frame_idx, []) if seat_students.get(t.seat_id)}
+        people = list(zip(det.track_ids, det.bboxes, det.keypoints))
+        keep = [head_box(kps, bbox) for tid, bbox, kps in people if tid in identified]
+        blur_heads(frame, [head_box(kps, bbox) for tid, bbox, kps in people if tid not in identified])
+        blur_heads(frame, [b for b in blurrer.face_boxes(frame) if outside_all(b, keep)])
         student_ids = set()
         for t in by_frame.get(det.frame_idx, []):
             student_ids.add(t.track_id)
             colour = STATE_COLOURS[t.state]
             x1, y1, x2, y2 = map(int, t.bbox)
             cv2.rectangle(frame, (x1, y1), (x2, y2), colour, 2)
-            label = f"{t.seat_id or '-'} {t.state.value}"
+            label = f"{seat_students.get(t.seat_id) or t.seat_id or '-'} {t.state.value}"
             cv2.putText(frame, label, (x1, max(12, y1 - 4)), cv2.FONT_HERSHEY_SIMPLEX, 0.4, colour, 1, cv2.LINE_AA)
         for tid, bbox in zip(det.track_ids, det.bboxes):
             if tid not in student_ids:
@@ -296,6 +342,44 @@ def write_preview(
         writer.write(frame)
     writer.release()
     cap.release()
+
+
+def identify_seats(args, frames: list[FrameDetections], tokens: list[ClassroomToken], seatmap: SeatMap) -> dict[str, str]:
+    """
+    Consent-gated seat → student mapping. Returns only identified seats.
+
+    Face matching runs only when the gallery holds at least one student whose
+    consent allows this purpose; otherwise no face is detected or embedded.
+    """
+    out = args.out or Path("outputs") / args.video.stem
+    registry = ConsentRegistry(args.consent)
+    allowed = registry.allowed_students(args.purpose)
+    chart = load_seating_chart(args.seating_chart, registry)
+
+    gallery = Gallery(dim=128)
+    if allowed and args.gallery.exists():
+        gallery = Gallery.load(args.gallery)
+        gallery.restrict_to(allowed)
+
+    seat_ids = [s.seat_id for s in seatmap.seats]
+    if len(gallery):
+        from .faces import OpenCVFaceEmbedder
+        identifier = SeatIdentifier(gallery, OpenCVFaceEmbedder())
+        run_identification(args.video, frames, tokens, identifier, every_n=max(1, round(args.fps)))
+    else:
+        identifier = SeatIdentifier(gallery, embedder=None)   # chart-only / anonymous
+    identities = identifier.resolve(seat_ids, chart, allowed)
+    save_identities(out / "seat_identity.json", identities)
+
+    seat_students = {s: i.student_id for s, i in identities.items() if i.student_id}
+    AuditLog(args.audit).record(
+        "identify_run", video=str(args.video), purpose=args.purpose, seats=len(seat_ids),
+        identified=len(seat_students), conflicts=sum(i.source == "conflict" for i in identities.values()),
+        gallery_students=len(gallery),
+    )
+    logger.info(f"Identity: {len(seat_students)}/{len(seat_ids)} seats linked to consented students "
+                f"(gallery {len(gallery)}, chart {len(chart)}, purpose {args.purpose})")
+    return seat_students
 
 
 def load_cached_detections(cache: Path, key: dict) -> Optional[list[FrameDetections]]:
@@ -321,6 +405,11 @@ def main(argv: Optional[list[str]] = None) -> None:
     parser.add_argument("--smooth-seconds", type=float, default=3.0)
     parser.add_argument("--max-seconds", type=float, default=None)
     parser.add_argument("--preview", action="store_true")
+    parser.add_argument("--consent", type=Path, default=Path("data/consent/registry.csv"))
+    parser.add_argument("--gallery", type=Path, default=Path("data/faces/gallery.enc"))
+    parser.add_argument("--seating-chart", type=Path, default=None, help="CSV: seat_id,student_id")
+    parser.add_argument("--purpose", choices=["engagement", "exam"], default="engagement")
+    parser.add_argument("--audit", type=Path, default=Path("data/audit/audit.jsonl"))
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
@@ -360,9 +449,13 @@ def main(argv: Optional[list[str]] = None) -> None:
     tokens_df = pd.DataFrame([t.to_dict() for t in tokens])
     if tokens_df.empty:
         sys.exit("No student tokens produced — check the seat map / detections")
+
+    seat_students = identify_seats(args, frames, tokens, seatmap)
+    tokens_df["student_id"] = tokens_df["seat_id"].map(seat_students)
     tokens_df.to_parquet(out / "tokens.parquet", index=False)
 
     seat_timeline, class_engagement = aggregate(tokens_df)
+    seat_timeline["student_id"] = seat_timeline["seat_id"].map(seat_students)
     seat_timeline.to_parquet(out / "seat_timeline.parquet", index=False)
     class_engagement.to_csv(out / "class_engagement.csv", index=False)
 
@@ -381,12 +474,13 @@ def main(argv: Optional[list[str]] = None) -> None:
         "state_distribution": tokens_df["state"].value_counts(normalize=True).round(3).to_dict(),
         "mean_engaged_share": round(float(class_engagement["engaged_share"].mean()), 3),
         "phone_frames": int(sum(bool(f.phones) for f in frames)),
+        "identified_seats": len(seat_students),
     }
     (out / "summary.json").write_text(json.dumps(summary, indent=2))
     logger.info(json.dumps(summary, indent=2))
 
     if args.preview:
-        write_preview(args.video, out / "preview.mp4", frames, tokens, args.fps)
+        write_preview(args.video, out / "preview.mp4", frames, tokens, args.fps, seat_students)
         logger.info(f"Preview: {out / 'preview.mp4'}")
 
 
