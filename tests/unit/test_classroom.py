@@ -1,6 +1,7 @@
 """Unit tests for classroom seat map, head pose and state rules — no GPU, no video."""
 
 import numpy as np
+import pytest
 import pandas as pd
 
 from classroom.headpose import estimate_head_pose
@@ -100,6 +101,24 @@ class TestSeatMap:
         loaded = SeatMap.from_json(tmp_path / "s.json")
         assert [s.seat_id for s in loaded.seats] == [s.seat_id for s in sm.seats]
 
+    def test_out_of_seat_needs_persistence_and_distance(self):
+        st = SeatTracker(window=5)
+        for _ in range(5):
+            st.update({1: "R1C1"})
+        st.update({1: None})
+        assert not st.is_out_of_seat(1, away_radii=5.0, min_frames=3)   # one frame: jitter
+        st.update({1: None})
+        st.update({1: None})
+        assert st.is_out_of_seat(1, away_radii=5.0, min_frames=3)
+        assert not st.is_out_of_seat(1, away_radii=1.2, min_frames=3)   # leaning, still at the seat
+        st.update({1: "R1C1"})
+        assert not st.is_out_of_seat(1, away_radii=5.0, min_frames=3)   # back in seat resets
+
+    def test_distance_in_radii(self):
+        sm = grid_seatmap(n=2)                                         # R1C1 at (0.1, 0.5), radius 0.05
+        assert sm.distance_in_radii("R1C1", (0.2, 0.5)) == pytest.approx(2.0)
+        assert sm.distance_in_radii(None, (0.2, 0.5)) == float("inf")
+
     def test_seat_tracker_roles(self):
         st = SeatTracker(window=5, student_share=0.5)
         for _ in range(10):
@@ -137,6 +156,18 @@ class TestStateRules:
 
     def test_hand_raised(self):
         assert classify(seated_keypoints(wrist_y=30)) == StudentState.HAND_RAISED
+
+    def test_face_level_hand_raise_counts(self):
+        kp = seated_keypoints()
+        kp[7] = [130, 85, 0.9]              # left elbow lifted to shoulder height
+        kp[9] = [138, 62, 0.9]              # left wrist above shoulders, beside the face (nose at x=100)
+        assert classify(kp) == StudentState.HAND_RAISED
+
+    def test_hand_on_chin_is_not_a_raise(self):
+        kp = seated_keypoints()
+        kp[7] = [120, 125, 0.9]             # elbow down on the desk
+        kp[9] = [104, 70, 0.9]              # wrist under the chin, next to the nose
+        assert classify(kp) != StudentState.HAND_RAISED
 
     def test_phone(self):
         assert classify(seated_keypoints(), target_phone=True) == StudentState.PHONE

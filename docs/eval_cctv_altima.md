@@ -14,20 +14,19 @@
 | writing | 1.00 | 0.27 | 0.43 | 37 | 10 |
 | hand_raised | — | — | — | 0 | 0 |
 | head_down | 0.00 | — | — | 0 | 17 |
-| turned_away | 0.00 | — | — | 0 | 1 |
+| turned_away | 0.00 | — | — | 0 | 2 |
 | interacting | — | — | — | 0 | 0 |
 | phone | — | — | — | 0 | 0 |
-| out_of_seat | 0.00 | — | — | 0 | 1 |
+| out_of_seat | — | — | — | 0 | 0 |
 
 ## Confusion matrix (rows = label, columns = prediction)
 
-| label \ pred | attentive | writing | head_down | turned_away | out_of_seat |
-|---|---|---|---|---|---|
-| attentive | 0 | 0 | 0 | 0 | 0 |
-| writing | 8 | 10 | 17 | 1 | 1 |
-| head_down | 0 | 0 | 0 | 0 | 0 |
-| turned_away | 0 | 0 | 0 | 0 | 0 |
-| out_of_seat | 0 | 0 | 0 | 0 | 0 |
+| label \ pred | attentive | writing | head_down | turned_away |
+|---|---|---|---|---|
+| attentive | 0 | 0 | 0 | 0 |
+| writing | 8 | 10 | 17 | 2 |
+| head_down | 0 | 0 | 0 | 0 |
+| turned_away | 0 | 0 | 0 | 0 |
 
 ## By person size (resolution bias check)
 

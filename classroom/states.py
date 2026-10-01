@@ -3,7 +3,9 @@ StateClassifier — per-student classroom state from pose + head cues.
 
 Rules, in priority order (first match wins):
   1. OUT_OF_SEAT   student track currently not on any seat
-  2. HAND_RAISED   a wrist clearly above the nose
+  2. HAND_RAISED   a wrist above the nose, or (small children) a wrist above
+                   the shoulder line beside the face with the elbow lifted.
+                   A hand on the chin or cheek doesn't count.
   3. PHONE         a detected phone inside the student's hand/lap region
   4. TURNED_AWAY   back to camera while the class faces it
   5. HEAD_DOWN / WRITING
@@ -48,6 +50,7 @@ from .headpose import (
 from .seatmap import SeatMap
 from .tokens import HeadPose, StudentState
 
+KP_LEFT_ELBOW, KP_RIGHT_ELBOW = 7, 8
 KP_LEFT_WRIST, KP_RIGHT_WRIST = 9, 10
 
 
@@ -60,6 +63,9 @@ class ClassifierConfig:
     camera_baseline_min_samples: int = 50
     face_hidden_visibility: float = 0.25  # face keypoints this weak + shoulders → head down
     hand_raise_margin: float = 0.0        # wrist above nose by this many shoulder widths
+    face_level_wrist_lift: float = 0.3    # face-level raise: wrist this far above the shoulder line
+    face_level_elbow_drop: float = 0.6    # …elbow no lower than this below the shoulder line
+    face_level_side_offset: float = 0.5   # …wrist this far sideways from the nose (not on the chin)
     writing_motion: float = 0.06          # wrist std (shoulder widths) that counts as writing
     motion_window: int = 6                # sampled frames of wrist history
     min_head_confidence: float = 0.35
@@ -213,8 +219,27 @@ class StateClassifier:
     def _hand_raised(self, kps: np.ndarray, scale: float) -> bool:
         if kps[KP_NOSE, 2] < KP_CONF:
             return False
-        limit = kps[KP_NOSE, 1] - self.cfg.hand_raise_margin * scale
-        return any(kps[w, 2] >= KP_CONF and kps[w, 1] < limit for w in (KP_LEFT_WRIST, KP_RIGHT_WRIST))
+        cfg = self.cfg
+        nose_x, nose_y = kps[KP_NOSE, 0], kps[KP_NOSE, 1]
+        shoulders = [s for s in (KP_LEFT_SHOULDER, KP_RIGHT_SHOULDER) if kps[s, 2] >= KP_CONF]
+        shoulder_y = float(np.mean(kps[shoulders, 1])) if shoulders else None
+
+        for wrist, elbow in ((KP_LEFT_WRIST, KP_LEFT_ELBOW), (KP_RIGHT_WRIST, KP_RIGHT_ELBOW)):
+            if kps[wrist, 2] < KP_CONF:
+                continue
+            wx, wy = kps[wrist, 0], kps[wrist, 1]
+            if wy < nose_y - cfg.hand_raise_margin * scale:
+                return True
+            # Face-level raise (small children): hand up beside the face, elbow lifted
+            if (
+                shoulder_y is not None
+                and kps[elbow, 2] >= KP_CONF
+                and wy < shoulder_y - cfg.face_level_wrist_lift * scale
+                and kps[elbow, 1] < shoulder_y + cfg.face_level_elbow_drop * scale
+                and abs(wx - nose_x) > cfg.face_level_side_offset * scale
+            ):
+                return True
+        return False
 
     def _head_down(
         self, track_id: int, head: HeadPose, camera_baseline: Optional[float], kps: np.ndarray,

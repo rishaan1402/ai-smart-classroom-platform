@@ -158,6 +158,13 @@ class SeatMap:
         seat = next((s for s in self.seats if s.seat_id == seat_id), None)
         return (seat.x, seat.y) if seat else None
 
+    def distance_in_radii(self, seat_id: Optional[str], point: tuple[float, float]) -> float:
+        """How far a normalized point is from a seat, in units of that seat's radius (inf if unknown)."""
+        seat = next((s for s in self.seats if s.seat_id == seat_id), None)
+        if seat is None:
+            return float("inf")
+        return float(np.hypot(point[0] - seat.x, point[1] - seat.y) / max(seat.radius, 1e-6))
+
 
 def _name_and_size(centres: np.ndarray) -> list[Seat]:
     """Order seats into rows (by y gaps) and columns, and size their radii."""
@@ -192,12 +199,17 @@ class SeatTracker:
     A track's seat is the most common seat in its recent assignments. A track
     that has been seated for at least `student_share` of its lifetime is a
     student; otherwise it is OTHER (teacher, visitor).
+
+    Out of seat needs both persistence and displacement: a single frame without
+    a seat match is usually assignment jitter (leaning, occlusion), not a
+    student leaving their seat.
     """
 
     def __init__(self, window: int = 15, student_share: float = 0.5) -> None:
         self._recent: dict[int, deque] = defaultdict(lambda: deque(maxlen=window))
         self._seated: Counter = Counter()
         self._seen: Counter = Counter()
+        self._unseated_run: Counter = Counter()
         self._student_share = student_share
 
     def update(self, assignments: dict[int, Optional[str]]) -> dict[int, Optional[str]]:
@@ -206,6 +218,9 @@ class SeatTracker:
             self._seen[tid] += 1
             if seat is not None:
                 self._seated[tid] += 1
+                self._unseated_run[tid] = 0
+            else:
+                self._unseated_run[tid] += 1
             self._recent[tid].append(seat)
             votes = Counter(s for s in self._recent[tid] if s is not None)
             smoothed[tid] = votes.most_common(1)[0][0] if votes else None
@@ -218,3 +233,7 @@ class SeatTracker:
     def currently_seated(self, track_id: int) -> bool:
         recent = self._recent.get(track_id)
         return bool(recent) and recent[-1] is not None
+
+    def is_out_of_seat(self, track_id: int, away_radii: float, min_frames: int, min_away_radii: float = 2.0) -> bool:
+        """Unmatched for ≥ min_frames consecutive frames AND ≥ min_away_radii from its usual seat."""
+        return self._unseated_run[track_id] >= min_frames and away_radii >= min_away_radii

@@ -59,7 +59,8 @@ from .tokens import ENGAGED_STATES, ClassroomToken, Role, StudentState
 logger = logging.getLogger(__name__)
 
 COCO_CELL_PHONE = 67
-PHONE_CONF = 0.45  # COCO phones confuse with calculators below this
+PHONE_CONF = 0.45
+OUT_OF_SEAT_SECONDS = 3.0  # continuously away from the seat this long before it counts  # COCO phones confuse with calculators below this
 
 STATE_COLOURS = {  # BGR
     StudentState.ATTENTIVE: (80, 200, 80),
@@ -190,6 +191,7 @@ def run_reasoning(
     seatmap: SeatMap,
     camera_id: str,
     smooth_frames: int,
+    out_of_seat_frames: int = 9,
 ) -> list[ClassroomToken]:
     seat_tracker = SeatTracker()
     classifier = StateClassifier(seatmap, ClassifierConfig())
@@ -210,7 +212,9 @@ def run_reasoning(
                 keypoints=kps,
                 seat_id=seats[tid],
                 is_student=seat_tracker.is_student(tid),
-                seated_now=seat_tracker.currently_seated(tid),
+                seated_now=not seat_tracker.is_out_of_seat(
+                    tid, seatmap.distance_in_radii(seats[tid], anchors[tid]), out_of_seat_frames,
+                ),
                 has_phone=phone_in_hands(bbox, kps, det.phones),
             )
             for tid, bbox, kps in zip(det.track_ids, det.bboxes, det.keypoints)
@@ -399,8 +403,11 @@ def load_cached_detections(cache: Path, key: dict) -> Optional[list[FrameDetecti
     """Pass-1 results from a previous run with identical perception settings (local, self-written file)."""
     if not cache.exists():
         return None
-    with cache.open("rb") as f:
-        data = pickle.load(f)
+    try:
+        with cache.open("rb") as f:
+            data = pickle.load(f)
+    except (AttributeError, ModuleNotFoundError, EOFError, pickle.UnpicklingError):
+        return None   # stale format (e.g. pickled from __main__ before the entry-point fix) → recompute
     return data["frames"] if data.get("key") == key else None
 
 
@@ -458,7 +465,11 @@ def main(argv: Optional[list[str]] = None) -> None:
     seatmap.to_json(out / "seatmap.json")
     logger.info(f"Seat map: {len(seatmap)} seats")
 
-    tokens = run_reasoning(frames, seatmap, camera_id, smooth_frames=max(1, round(args.smooth_seconds * args.fps)))
+    tokens = run_reasoning(
+        frames, seatmap, camera_id,
+        smooth_frames=max(1, round(args.smooth_seconds * args.fps)),
+        out_of_seat_frames=max(1, round(OUT_OF_SEAT_SECONDS * args.fps)),
+    )
     tokens_df = pd.DataFrame([t.to_dict() for t in tokens])
     if tokens_df.empty:
         sys.exit("No student tokens produced — check the seat map / detections")
@@ -498,4 +509,7 @@ def main(argv: Optional[list[str]] = None) -> None:
 
 
 if __name__ == "__main__":
-    main()
+    # Run via the importable module, so pickled FrameDetections in the
+    # detection cache resolve to classroom.pipeline, not __main__
+    from classroom.pipeline import main as _main
+    _main()

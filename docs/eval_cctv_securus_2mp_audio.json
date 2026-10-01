@@ -7,29 +7,29 @@
   ],
   "metrics": {
     "n": 91,
-    "accuracy": 0.5824175824175825,
-    "macro_f1": 0.4963369963369963,
-    "engaged_accuracy": 0.7252747252747253,
+    "accuracy": 0.6373626373626373,
+    "macro_f1": 0.5296667874649527,
+    "engaged_accuracy": 0.7912087912087912,
     "label_engaged_share": 0.7802197802197802,
-    "predicted_engaged_share": 0.7912087912087912
+    "predicted_engaged_share": 0.8571428571428571
   },
   "agreement": null,
   "per_class": [
     {
       "state": "attentive",
       "precision": 0.75,
-      "recall": 0.7358490566,
-      "f1": 0.7428571429,
+      "recall": 0.7924528302,
+      "f1": 0.7706422018,
       "support": 53,
-      "predicted": 52
+      "predicted": 56
     },
     {
       "state": "writing",
-      "precision": 0.35,
-      "recall": 0.4666666667,
-      "f1": 0.4,
+      "precision": 0.4090909091,
+      "recall": 0.6,
+      "f1": 0.4864864865,
       "support": 15,
-      "predicted": 20
+      "predicted": 22
     },
     {
       "state": "hand_raised",
@@ -41,11 +41,11 @@
     },
     {
       "state": "head_down",
-      "precision": 0.4444444444,
+      "precision": 0.5,
       "recall": 0.3333333333,
-      "f1": 0.380952381,
+      "f1": 0.4,
       "support": 12,
-      "predicted": 9
+      "predicted": 8
     },
     {
       "state": "turned_away",
@@ -73,11 +73,11 @@
     },
     {
       "state": "out_of_seat",
-      "precision": 0.0,
+      "precision": null,
       "recall": null,
       "f1": null,
       "support": 0,
-      "predicted": 5
+      "predicted": 0
     }
   ],
   "by_resolution": [
@@ -92,15 +92,15 @@
       "boxes": "medium",
       "px": "93\u2013132",
       "n": 30,
-      "accuracy": 0.5333333333,
-      "engaged_accuracy": 0.6333333333
+      "accuracy": 0.6,
+      "engaged_accuracy": 0.7333333333
     },
     {
       "boxes": "large (front)",
       "px": "136\u2013239",
       "n": 30,
-      "accuracy": 0.5,
-      "engaged_accuracy": 0.7
+      "accuracy": 0.6,
+      "engaged_accuracy": 0.8
     }
   ]
 }

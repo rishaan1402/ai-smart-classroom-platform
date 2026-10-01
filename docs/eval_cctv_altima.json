@@ -53,7 +53,7 @@
       "recall": null,
       "f1": null,
       "support": 0,
-      "predicted": 1
+      "predicted": 2
     },
     {
       "state": "interacting",
@@ -73,11 +73,11 @@
     },
     {
       "state": "out_of_seat",
-      "precision": 0.0,
+      "precision": null,
       "recall": null,
       "f1": null,
       "support": 0,
-      "predicted": 1
+      "predicted": 0
     }
   ],
   "by_resolution": [

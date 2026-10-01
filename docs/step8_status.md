@@ -24,6 +24,25 @@ Full tables: `docs/eval_cctv_securus_2mp_audio.md`, `docs/eval_cctv_altima.md`.
 4. **`out_of_seat` is a false alarm** on Securus (5 predicted, 0 true): seat-assignment jitter, not real movement. Needs a minimum duration and a displacement check.
 5. Resolution: on Securus, back rows scored *higher* (71%) than front rows (50%). The back rows here are small children sitting still, front rows move more, so this is about behaviour mix, not just pixels. Not a fairness result.
 
+## Rule fixes (same day), re-scored on the same labels
+Scored with `labeling.evaluate --repredict` against the same 141 provisional labels. These labels were also used to diagnose the problems, so this is a sanity check, not a held-out result.
+
+| Securus | Before | After |
+|---|---|---|
+| State accuracy | 58% | **64%** |
+| Engaged-vs-not accuracy | 73% | **79%** |
+| `out_of_seat` false alarms (in sample) | 5 | **0** |
+| `out_of_seat` share of all observations | 6.1% | 0.1% |
+| Raised hands found | 0 / 3 | 0 / 3 |
+| Class engaged share, labels vs. predicted | 78% vs. 79% | 78% vs. **86%** |
+
+1. **Out of seat** now needs ≥ 3 s continuously without a seat match **and** an anchor ≥ 2 seat-radii from the student's usual seat (`SeatTracker.is_out_of_seat`). Seat-assignment jitter no longer fires it.
+2. **Face-level hand raise** (wrist above the shoulder line, elbow lifted, hand beside the face, not on the chin) is in, with tests, but **found none of the 3 labelled raises**. Keypoint inspection shows why: at 20–45 px shoulder width the pose model either loses the raised arm (confidence 0.2) or puts the wrist at or below the shoulder while the hand is at the face. Loosening the threshold to "wrist level with the shoulder" added a wrong prediction and still found none, so it was reverted. Fixing this needs pose on upscaled per-student crops or a learned classifier, not thresholds.
+3. **Side effect**: the false out-of-seat calls had been offsetting the opposite error (writing and head-down students called attentive), so the class-level share now overestimates engagement by 8 points on this sample (≈ 2 standard errors at n = 91). Per-moment accuracy is better; the aggregate is less calibrated. Watch this when human labels arrive. The real fix is the writing/head-down confusion, not reintroducing a false alarm.
+4. Also fixed: the detection cache was pickled from `__main__` when the pipeline ran via `-m`, so other modules couldn't load it. The entry point now runs through the importable module; stale caches are recomputed instead of crashing; existing caches were migrated.
+
+Altima is unchanged (27%); its errors are the top-down writing confusion, which these fixes don't touch.
+
 ## Privacy notes found while labelling
 - Top-down views: faces looking straight down are not detected, so some partial faces in Altima strips are not pixelated. Strips are for authorized internal labellers only. Before using pilot footage, add a top-of-head blur for steep cameras or review strips before release.
 - Labelling students' footage for model improvement is a **separate consent purpose**. Add it to the consent form; only export lessons whose students consented to it.

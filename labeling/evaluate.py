@@ -15,9 +15,14 @@ Per lesson (and pooled over --lesson repeats):
 
 With several labellers, the reference label is the majority (ties → first labeller).
 
+Predictions come from the task manifest (frozen at export). --repredict
+instead looks each task up in the lesson's current tokens.parquet by (track,
+time), to score a changed pipeline against the same labels. This only works
+while detections are reused from the cache, so track ids are unchanged.
+
 Usage:
   .venv/bin/python -m labeling.evaluate --lesson cctv_securus_2mp_audio [--lesson cctv_altima] \\
-      [--labeller alice] [--out docs/eval_report.md]
+      [--labeller alice] [--repredict] [--out docs/eval_report.md]
 """
 
 import argparse
@@ -35,13 +40,32 @@ ENGAGED = {"attentive", "writing", "hand_raised"}
 EXCLUDED = {"cant_tell", "not_a_student"}
 
 
-def joined(lessons: list[str], root: Path = DATA_ROOT, labeller: Optional[str] = None) -> pd.DataFrame:
+def current_predictions(lesson: str, outputs: Path = Path("outputs"), tolerance_s: float = 0.2) -> dict[str, str]:
+    """task id → state from the lesson's current tokens.parquet, matched on track id and time."""
+    tasks = load_tasks(lesson)
+    tokens = pd.read_parquet(outputs / lesson / "tokens.parquet", columns=["track_id", "timestamp_s", "state"])
+    by_track = {tid: g for tid, g in tokens.groupby("track_id")}
+    out = {}
+    for t in tasks["tasks"]:
+        g = by_track.get(t["track_id"])
+        if g is None:
+            continue
+        nearest = (g["timestamp_s"] - t["t"]).abs()
+        if nearest.min() <= tolerance_s:
+            out[t["id"]] = g.loc[nearest.idxmin(), "state"]
+    return out
+
+
+def joined(
+    lessons: list[str], root: Path = DATA_ROOT, labeller: Optional[str] = None, repredict: bool = False,
+) -> pd.DataFrame:
     """One row per labelled task: prediction, reference label, labellers, box size."""
     rows = []
     for lesson in lessons:
         tasks = load_tasks(lesson, root)
         if tasks is None:
             continue
+        fresh = current_predictions(lesson) if repredict else {}
         labels = load_labels(lesson, root)
         if labeller:
             labels = labels[labels["labeller"] == labeller]
@@ -54,7 +78,7 @@ def joined(lessons: list[str], root: Path = DATA_ROOT, labeller: Optional[str] =
             top = counts[counts == counts.max()].index
             reference = g["label"].iloc[0] if len(top) > 1 else top[0]
             rows.append({
-                "lesson": lesson, "task_id": t["id"], "predicted": t["predicted"], "label": reference,
+                "lesson": lesson, "task_id": t["id"], "predicted": fresh.get(t["id"], t["predicted"]), "label": reference,
                 "n_labellers": g["labeller"].nunique(), "box_height_px": t["box_height_px"],
                 "labels": dict(zip(g["labeller"], g["label"])),
             })
@@ -127,8 +151,10 @@ def by_resolution(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def report(lessons: list[str], root: Path = DATA_ROOT, labeller: Optional[str] = None) -> tuple[str, dict]:
-    df = joined(lessons, root, labeller)
+def report(
+    lessons: list[str], root: Path = DATA_ROOT, labeller: Optional[str] = None, repredict: bool = False,
+) -> tuple[str, dict]:
+    df = joined(lessons, root, labeller, repredict)
     if df.empty:
         return "No labels yet.\n", {}
     m = metrics(df)
@@ -180,10 +206,11 @@ def main(argv: Optional[list[str]] = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--lesson", action="append", required=True)
     parser.add_argument("--labeller", default=None, help="Only this labeller's labels")
+    parser.add_argument("--repredict", action="store_true", help="Score the current tokens.parquet, not export-time predictions")
     parser.add_argument("--out", type=Path, default=None)
     args = parser.parse_args(argv)
 
-    text, payload = report(args.lesson, labeller=args.labeller)
+    text, payload = report(args.lesson, labeller=args.labeller, repredict=args.repredict)
     print(text)
     if args.out:
         args.out.write_text(text)
