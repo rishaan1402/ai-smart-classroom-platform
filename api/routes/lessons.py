@@ -10,7 +10,8 @@ Access rules:
     blurred preview video.
   - STUDENT_ROLES only: student identities on the seat grid and per-student
     pages, and only for students whose consent still allows the purpose.
-  - Every lesson view, preview stream and student view is audit-logged.
+  - EXAM_ROLES only: exam flags, review clips and review decisions.
+  - Every lesson view, preview stream, student view, exam view and review is audit-logged.
 """
 
 import os
@@ -19,6 +20,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 
 from analytics.store import LessonNotFound, LessonStore
 from classroom.consent import AuditLog, ConsentRegistry
@@ -28,6 +30,7 @@ from ..auth import TokenPayload, get_current_user
 router = APIRouter(prefix="/api", tags=["lessons"])
 
 STUDENT_ROLES = {"admin", "principal", "teacher"}
+EXAM_ROLES = {"admin", "principal", "teacher", "invigilator"}
 
 
 @lru_cache(maxsize=1)
@@ -102,6 +105,76 @@ def get_preview(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No preview for this lesson")
     audit.record("view_preview", actor=user.sub, role=user.role, lesson=lesson_id)
     return FileResponse(path, media_type="video/mp4")
+
+
+class ExamReviewIn(BaseModel):
+    flag_id: str
+    decision: str
+    note: str = ""
+
+
+def _require_exam_role(user: TokenPayload) -> None:
+    if user.role not in EXAM_ROLES:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Requires an exam review role")
+
+
+@router.get("/lessons/{lesson_id}/exam")
+def get_exam(
+    lesson_id: str,
+    user: TokenPayload = Depends(get_current_user),
+    store: LessonStore = Depends(get_store),
+    audit: AuditLog = Depends(get_audit),
+):
+    _require_exam_role(user)
+    try:
+        data = store.exam(lesson_id, reveal_students=_can_see_students(user))
+    except LessonNotFound:
+        data = None
+    if data is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No exam flags for this lesson")
+    audit.record("view_exam_flags", actor=user.sub, role=user.role, lesson=lesson_id, flags=len(data["flags"]))
+    return data
+
+
+@router.get("/lessons/{lesson_id}/exam/clips/{flag_id}")
+def get_exam_clip(
+    lesson_id: str,
+    flag_id: str,
+    user: TokenPayload = Depends(get_current_user),
+    store: LessonStore = Depends(get_store),
+    audit: AuditLog = Depends(get_audit),
+):
+    _require_exam_role(user)
+    try:
+        path = store.exam_clip_path(lesson_id, flag_id)
+    except LessonNotFound:
+        path = None
+    if path is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No clip for this flag")
+    audit.record("view_exam_clip", actor=user.sub, role=user.role, lesson=lesson_id, flag=flag_id)
+    return FileResponse(path, media_type="video/mp4")
+
+
+@router.post("/lessons/{lesson_id}/exam/reviews")
+def post_exam_review(
+    lesson_id: str,
+    body: ExamReviewIn,
+    user: TokenPayload = Depends(get_current_user),
+    store: LessonStore = Depends(get_store),
+    audit: AuditLog = Depends(get_audit),
+):
+    _require_exam_role(user)
+    try:
+        entry = store.add_exam_review(lesson_id, body.flag_id, body.decision, body.note, user.sub)
+    except LessonNotFound:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lesson not found")
+    except KeyError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown flag")
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(e))
+    audit.record("review_exam_flag", actor=user.sub, role=user.role, lesson=lesson_id,
+                 flag=body.flag_id, decision=body.decision)
+    return entry
 
 
 @router.get("/students/{student_id}")

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, EyeOff, Info } from 'lucide-react'
+import { ArrowLeft, ClipboardCheck, EyeOff, Info } from 'lucide-react'
 import { api } from '../api'
 import EngagementChart from '../components/charts/EngagementChart'
 import StateMixBar from '../components/charts/StateMixBar'
@@ -43,7 +43,15 @@ export default function LessonPage() {
         <Link to="/lessons" className="text-xs text-slate-400 hover:text-slate-200 flex items-center gap-1">
           <ArrowLeft size={12} /> Lessons
         </Link>
-        <h1 className="mt-2 text-xl font-semibold text-white break-all">{lesson.id.replace(/_/g, ' ')}</h1>
+        <div className="mt-2 flex items-center justify-between gap-4">
+          <h1 className="text-xl font-semibold text-white break-all">{lesson.id.replace(/_/g, ' ')}</h1>
+          {lesson.has_exam && (
+            <Link to={`/lessons/${lesson.id}/exam`}
+              className="flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-200 hover:bg-slate-800 whitespace-nowrap">
+              <ClipboardCheck size={14} /> Exam review
+            </Link>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">

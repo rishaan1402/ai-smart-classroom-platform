@@ -84,6 +84,7 @@ class PersonObs:
     is_student: bool
     seated_now: bool
     has_phone: bool = False
+    at_seat_now: bool = True       # this frame's raw seat match (before smoothing / persistence gates)
 
 
 @dataclass
@@ -92,6 +93,29 @@ class Classification:
     confidence: float
     head: HeadPose
     cues: dict
+
+
+def local_yaw_consensus(
+    students: list[PersonObs], heads: dict[int, HeadPose], min_confidence: float, neighbours: int,
+) -> dict[int, float]:
+    """Median yaw of each student's nearest valid seated classmates (0.0 if too few)."""
+    valid = [
+        p for p in students
+        if p.seated_now and heads[p.track_id].yaw is not None and heads[p.track_id].confidence >= min_confidence
+    ]
+    if len(valid) < 3:
+        return {p.track_id: 0.0 for p in students}
+    centres = np.array([[(p.bbox[0] + p.bbox[2]) / 2, (p.bbox[1] + p.bbox[3]) / 2] for p in valid])
+    yaws = np.array([heads[p.track_id].yaw for p in valid])
+    k = min(neighbours, len(valid) - 1)
+
+    consensus = {}
+    for p in students:
+        me = np.array([(p.bbox[0] + p.bbox[2]) / 2, (p.bbox[1] + p.bbox[3]) / 2])
+        dist = np.linalg.norm(centres - me, axis=1)
+        dist[[q.track_id == p.track_id for q in valid]] = np.inf   # exclude self
+        consensus[p.track_id] = float(np.median(yaws[np.argsort(dist)[:k]]))
+    return consensus
 
 
 class StateClassifier:
@@ -132,26 +156,7 @@ class StateClassifier:
         }
 
     def _local_consensus(self, students: list[PersonObs], heads: dict[int, HeadPose]) -> dict[int, float]:
-        """Median yaw of each student's nearest valid seated classmates (0.0 if too few)."""
-        valid = [
-            p for p in students
-            if p.seated_now and heads[p.track_id].yaw is not None
-            and heads[p.track_id].confidence >= self.cfg.min_head_confidence
-        ]
-        if len(valid) < 3:
-            return {p.track_id: 0.0 for p in students}
-        centres = np.array([[(p.bbox[0] + p.bbox[2]) / 2, (p.bbox[1] + p.bbox[3]) / 2] for p in valid])
-        yaws = np.array([heads[p.track_id].yaw for p in valid])
-        k = min(self.cfg.consensus_neighbours, len(valid) - 1)
-
-        consensus = {}
-        for p in students:
-            me = np.array([(p.bbox[0] + p.bbox[2]) / 2, (p.bbox[1] + p.bbox[3]) / 2])
-            dist = np.linalg.norm(centres - me, axis=1)
-            dist[[q.track_id == p.track_id for q in valid]] = np.inf   # exclude self
-            nearest = np.argsort(dist)[:k]
-            consensus[p.track_id] = float(np.median(yaws[nearest]))
-        return consensus
+        return local_yaw_consensus(students, heads, self.cfg.min_head_confidence, self.cfg.consensus_neighbours)
 
     def forget(self, active_ids: set[int]) -> None:
         for store in (self._pitch_history, self._wrist_history):

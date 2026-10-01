@@ -9,6 +9,7 @@ import LessonsPage from './pages/LessonsPage'
 import LessonPage from './pages/LessonPage'
 import StudentPage from './pages/StudentPage'
 import LabelPage from './pages/LabelPage'
+import ExamReviewPage from './pages/ExamReviewPage'
 import Layout from './components/Layout'
 
 function RequireAuth({ children }) {
@@ -32,6 +33,7 @@ export default function App() {
             <Route index element={<Navigate to="/lessons" replace />} />
             <Route path="lessons" element={<LessonsPage />} />
             <Route path="lessons/:id" element={<LessonPage />} />
+            <Route path="lessons/:id/exam" element={<ExamReviewPage />} />
             <Route path="students/:id" element={<StudentPage />} />
             <Route path="label" element={<LabelPage />} />
             <Route path="label/:lesson" element={<LabelPage />} />

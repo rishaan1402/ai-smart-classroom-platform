@@ -52,6 +52,7 @@ from .headpose import shoulder_anchor, shoulder_width
 from .identity import (
     FaceBlurrer, Gallery, SeatIdentifier, blur_heads, head_box, load_seating_chart, outside_all, save_identities,
 )
+from .exam import ExamConfig, ExamFlag, ExamMonitor, room_noise_flags
 from .refine import GATES, refine_frames
 from .seatmap import SeatMap, SeatTracker
 from .states import ClassifierConfig, PersonObs, StateClassifier, TemporalSmoother
@@ -193,6 +194,7 @@ def run_reasoning(
     camera_id: str,
     smooth_frames: int,
     out_of_seat_frames: int = 9,
+    exam: Optional["ExamMonitor"] = None,
 ) -> list[ClassroomToken]:
     seat_tracker = SeatTracker()
     classifier = StateClassifier(seatmap, ClassifierConfig())
@@ -204,7 +206,8 @@ def run_reasoning(
             tid: (x / det.width, y / det.height)
             for tid, (x, y) in zip(det.track_ids, (shoulder_anchor(k, b) for k, b in zip(det.keypoints, det.bboxes)))
         }
-        seats = seat_tracker.update(seatmap.assign(anchors))
+        raw_seats = seatmap.assign(anchors)
+        seats = seat_tracker.update(raw_seats)
 
         people = [
             PersonObs(
@@ -217,10 +220,13 @@ def run_reasoning(
                     tid, seatmap.distance_in_radii(seats[tid], anchors[tid]), out_of_seat_frames,
                 ),
                 has_phone=phone_in_hands(bbox, kps, det.phones),
+                at_seat_now=raw_seats.get(tid) is not None,
             )
             for tid, bbox, kps in zip(det.track_ids, det.bboxes, det.keypoints)
         ]
         results = classifier.classify_frame(people)
+        if exam is not None:
+            exam.observe(det.timestamp_s, people, det.width, det.height)
 
         for p in people:
             if p.track_id not in results:
@@ -400,6 +406,89 @@ def identify_seats(args, frames: list[FrameDetections], tokens: list[ClassroomTo
     return seat_students
 
 
+def write_exam_outputs(
+    args, out: Path, exam: ExamMonitor, frames: list[FrameDetections], seat_students: dict, seatmap: SeatMap,
+) -> None:
+    """exam_flags.json, exam_summary.json and blurred review clips for the top flags."""
+    from audio.io import load_audio
+    from audio.room import noise_curve
+
+    flags = exam.finish()
+    for f in flags:
+        f.student_id = seat_students.get(f.seat_id)
+
+    room_flags: list[dict] = []
+    audio = load_audio(args.video)
+    if len(audio) and float(np.abs(audio).max()) > 1e-4:          # skip silent tracks
+        room_flags = room_noise_flags(noise_curve(audio))
+
+    clip_dir = out / "flags"
+    clip_dir.mkdir(exist_ok=True)
+    for old in clip_dir.glob("*.mp4"):
+        old.unlink()
+    for f in flags[: args.max_clips]:
+        write_flag_clip(args.video, f, frames, seat_students, clip_dir / f"{f.id}.mp4", seatmap)
+        f.clip = f"flags/{f.id}.mp4"
+
+    summary = {**exam.summary(flags), "room_flags": len(room_flags), "clips": min(len(flags), args.max_clips)}
+    (out / "exam_flags.json").write_text(json.dumps(
+        {"flags": [f.to_dict() for f in flags], "room": room_flags}, indent=1))
+    (out / "exam_summary.json").write_text(json.dumps(summary, indent=2))
+    logger.info(f"Exam: {json.dumps(summary)}")
+
+
+def write_flag_clip(
+    video: Path, flag: ExamFlag, frames: list[FrameDetections], seat_students: dict, out_path: Path,
+    seatmap: Optional[SeatMap] = None, pad_s: float = 3.0, max_s: float = 15.0, out_fps: float = 10.0,
+) -> None:
+    """
+    Review clip: flagged student boxed in yellow, the neighbour's seat ringed
+    in orange. Data minimization: only the flagged student can appear
+    unblurred, and only if identified under exam consent; everyone else,
+    neighbour included, stays blurred.
+    """
+    blurrer = FaceBlurrer()
+    cap = cv2.VideoCapture(str(video))
+    src_fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+    start = max(0.0, flag.start_s - pad_s)
+    end = min(flag.end_s + pad_s, start + max_s)
+    times = np.array([f.timestamp_s for f in frames])
+    raw_path = out_path.with_suffix(".raw.mp4")
+    writer = cv2.VideoWriter(str(raw_path), cv2.VideoWriter_fourcc(*"mp4v"), out_fps, (frames[0].width, frames[0].height))
+
+    face_cache: dict[int, list] = {}   # detection frame → face boxes, reused across output frames
+    for t in np.arange(start, end, 1.0 / out_fps):
+        cap.set(cv2.CAP_PROP_POS_FRAMES, int(round(t * src_fps)))
+        ok, frame = cap.read()
+        if not ok:
+            break
+        det = frames[int(np.argmin(np.abs(times - t)))]
+        if det.frame_idx not in face_cache:
+            face_cache[det.frame_idx] = blurrer.face_boxes(frame)
+        people = list(zip(det.track_ids, det.bboxes, det.keypoints))
+        show_target = bool(seat_students.get(flag.seat_id))
+        keep = [head_box(k, b) for tid, b, k in people if show_target and tid == flag.track_id]
+        blur_heads(frame, [head_box(k, b) for tid, b, k in people if not (show_target and tid == flag.track_id)])
+        blur_heads(frame, [b for b in face_cache[det.frame_idx] if outside_all(b, keep)])
+        for tid, bbox, _ in people:
+            if tid == flag.track_id:
+                x1, y1, x2, y2 = map(int, bbox)
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 255), 3)
+        if flag.neighbour_seat and seatmap is not None:
+            seat = next((st for st in seatmap.seats if st.seat_id == flag.neighbour_seat), None)
+            if seat is not None:
+                cv2.circle(frame, (int(seat.x * det.width), int(seat.y * det.height)),
+                           max(12, int(seat.radius * det.width * 1.5)), (0, 140, 255), 2)
+        label = f"{flag.type.replace('_', ' ')}  seat {flag.seat_id}  t={t:6.1f}s"
+        active = flag.start_s <= t <= flag.end_s
+        cv2.putText(frame, label, (10, 26), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
+                    (0, 255, 255) if active else (200, 200, 200), 2, cv2.LINE_AA)
+        writer.write(frame)
+    writer.release()
+    cap.release()
+    to_browser_mp4(raw_path, out_path)
+
+
 def refined_detections(args, frames: list[FrameDetections], perception_key: dict, out: Path, device: str):
     """Crop-level pose refinement (classroom/refine.py), cached separately per gate."""
     key = {**perception_key, "refine_pose": args.refine_pose}
@@ -448,11 +537,18 @@ def main(argv: Optional[list[str]] = None) -> None:
     parser.add_argument("--consent", type=Path, default=Path("data/consent/registry.csv"))
     parser.add_argument("--gallery", type=Path, default=Path("data/faces/gallery.enc"))
     parser.add_argument("--seating-chart", type=Path, default=None, help="CSV: seat_id,student_id")
-    parser.add_argument("--purpose", choices=["engagement", "exam"], default="engagement")
+    parser.add_argument("--mode", choices=["lesson", "exam"], default="lesson",
+                        help="exam: per-student proctoring flags + review clips")
+    parser.add_argument("--purpose", choices=["engagement", "exam"], default=None,
+                        help="Consent purpose for identity (default: exam in exam mode, else engagement)")
+    parser.add_argument("--max-clips", type=int, default=40)
+    parser.add_argument("--allow-calculators", action="store_true",
+                        help="Exam allows calculators: don't raise device flags (COCO phones include calculators)")
     parser.add_argument("--audit", type=Path, default=Path("data/audit/audit.jsonl"))
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
+    args.purpose = args.purpose or ("exam" if args.mode == "exam" else "engagement")
     camera_id = args.camera_id or args.video.stem
     out = args.out or Path("outputs") / args.video.stem
     out.mkdir(parents=True, exist_ok=True)
@@ -487,16 +583,20 @@ def main(argv: Optional[list[str]] = None) -> None:
     seatmap.to_json(out / "seatmap.json")
     logger.info(f"Seat map: {len(seatmap)} seats")
 
+    exam = ExamMonitor(seatmap, ExamConfig(flag_devices=not args.allow_calculators)) if args.mode == "exam" else None
     tokens = run_reasoning(
         frames, seatmap, camera_id,
         smooth_frames=max(1, round(args.smooth_seconds * args.fps)),
         out_of_seat_frames=max(1, round(OUT_OF_SEAT_SECONDS * args.fps)),
+        exam=exam,
     )
     tokens_df = pd.DataFrame([t.to_dict() for t in tokens])
     if tokens_df.empty:
         sys.exit("No student tokens produced — check the seat map / detections")
 
     seat_students = identify_seats(args, frames, tokens, seatmap)
+    if exam is not None:
+        write_exam_outputs(args, out, exam, frames, seat_students, seatmap)
     tokens_df["student_id"] = tokens_df["seat_id"].map(seat_students)
     tokens_df.to_parquet(out / "tokens.parquet", index=False)
 

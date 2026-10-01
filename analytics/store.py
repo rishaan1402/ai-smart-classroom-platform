@@ -15,6 +15,7 @@ consent still allows the purpose.
 
 import json
 import re
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -82,6 +83,7 @@ class LessonStore:
                 "talk_ratio": audio.get("talk_ratio"),
                 "language": audio.get("language"),
                 "topics": len(topics),
+                "has_exam": (path / "exam_flags.json").exists(),
             })
         return out
 
@@ -93,6 +95,7 @@ class LessonStore:
         return {
             "id": lesson_id,
             "has_preview": (path / "preview.mp4").exists(),
+            "has_exam": (path / "exam_flags.json").exists(),
             "video": _public_summary(summary),
             "engagement": _curve(engagement),
             "state_mix": _state_mix(summary),
@@ -137,6 +140,58 @@ class LessonStore:
                                               "dominant_state": None, "state_mix": {}}),
             })
         return out
+
+    # ------------------------------------------------------------------
+    # Exam review
+    # ------------------------------------------------------------------
+
+    REVIEW_DECISIONS = ("confirmed", "dismissed", "unclear")
+
+    def exam(self, lesson_id: str, reveal_students: bool = False) -> Optional[dict]:
+        """Flags, summary and latest review per flag; student ids only when revealed and exam consent allows."""
+        path = self._dir(lesson_id)
+        flags_doc = _json(path / "exam_flags.json")
+        if flags_doc is None:
+            return None
+        reviews = self.exam_reviews(lesson_id)
+        flags = []
+        for f in flags_doc["flags"]:
+            sid = f.get("student_id")
+            visible = reveal_students and sid and (self.registry is None or self.registry.allows(sid, "exam"))
+            flags.append({**f, "student_id": sid if visible else None, "review": reviews.get(f["id"])})
+        return {"summary": _json(path / "exam_summary.json") or {}, "flags": flags, "room": flags_doc.get("room", [])}
+
+    def exam_clip_path(self, lesson_id: str, flag_id: str) -> Optional[Path]:
+        path = self._dir(lesson_id)
+        flags_doc = _json(path / "exam_flags.json") or {"flags": []}
+        flag = next((f for f in flags_doc["flags"] if f["id"] == flag_id), None)
+        if flag is None or not flag.get("clip"):
+            return None
+        clip = (path / flag["clip"]).resolve()
+        return clip if clip.parent == (path / "flags").resolve() and clip.exists() else None
+
+    def exam_reviews(self, lesson_id: str) -> dict[str, dict]:
+        """Latest review per flag."""
+        path = self._dir(lesson_id) / "exam_reviews.jsonl"
+        latest: dict[str, dict] = {}
+        if path.exists():
+            for line in path.read_text().splitlines():
+                if line.strip():
+                    r = json.loads(line)
+                    latest[r["flag_id"]] = r
+        return latest
+
+    def add_exam_review(self, lesson_id: str, flag_id: str, decision: str, note: str, reviewer: str) -> dict:
+        if decision not in self.REVIEW_DECISIONS:
+            raise ValueError(f"decision must be one of {self.REVIEW_DECISIONS}")
+        path = self._dir(lesson_id)
+        flags_doc = _json(path / "exam_flags.json") or {"flags": []}
+        if flag_id not in {f["id"] for f in flags_doc["flags"]}:
+            raise KeyError(flag_id)
+        entry = {"flag_id": flag_id, "decision": decision, "note": note[:500], "reviewer": reviewer, "ts": time.time()}
+        with (path / "exam_reviews.jsonl").open("a") as f:
+            f.write(json.dumps(entry) + "\n")
+        return entry
 
     # ------------------------------------------------------------------
     # Students

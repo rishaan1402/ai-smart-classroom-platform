@@ -64,6 +64,12 @@ export const api = {
   previewUrl: (id) => `${BASE}/lessons/${encodeURIComponent(id)}/preview`,
   student: (id) => request('GET', `/students/${encodeURIComponent(id)}`),
 
+  // Exam review
+  exam: (id) => request('GET', `/lessons/${encodeURIComponent(id)}/exam`),
+  examClipUrl: (id, flagId) => `${BASE}/lessons/${encodeURIComponent(id)}/exam/clips/${encodeURIComponent(flagId)}`,
+  reviewExamFlag: (id, flagId, decision, note) =>
+    request('POST', `/lessons/${encodeURIComponent(id)}/exam/reviews`, { flag_id: flagId, decision, note }),
+
   // Labelling
   labelingSets: () => request('GET', '/labeling'),
   labelingNext: (lesson) => request('GET', `/labeling/${encodeURIComponent(lesson)}/next`),

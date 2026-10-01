@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { BookOpen, Mic, Video } from 'lucide-react'
+import { BookOpen, ClipboardCheck, Mic, Video } from 'lucide-react'
 import { api } from '../api'
 import { minutes, pct } from '../lib/format'
 
@@ -39,6 +39,7 @@ export default function LessonsPage() {
             <div className="mt-3 flex gap-3 text-xs text-slate-400">
               {l.has_video && <span className="flex items-center gap-1"><Video size={12} /> classroom video</span>}
               {l.has_audio && <span className="flex items-center gap-1"><Mic size={12} /> teacher audio{l.language ? ` · ${l.language}` : ''}</span>}
+              {l.has_exam && <span className="flex items-center gap-1"><ClipboardCheck size={12} /> exam flags</span>}
             </div>
             <dl className="mt-3 grid grid-cols-3 gap-2 text-xs">
               <Stat label="Length" value={minutes(l.duration_s)} />
