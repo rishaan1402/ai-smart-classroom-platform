@@ -7,8 +7,8 @@
   ],
   "metrics": {
     "n": 91,
-    "accuracy": 0.6373626373626373,
-    "macro_f1": 0.5296667874649527,
+    "accuracy": 0.6483516483516484,
+    "macro_f1": 0.5078632478632479,
     "engaged_accuracy": 0.7912087912087912,
     "label_engaged_share": 0.7802197802197802,
     "predicted_engaged_share": 0.8571428571428571
@@ -17,27 +17,27 @@
   "per_class": [
     {
       "state": "attentive",
-      "precision": 0.75,
+      "precision": 0.7636363636,
       "recall": 0.7924528302,
-      "f1": 0.7706422018,
+      "f1": 0.7777777778,
       "support": 53,
-      "predicted": 56
+      "predicted": 55
     },
     {
       "state": "writing",
-      "precision": 0.4090909091,
+      "precision": 0.4285714286,
       "recall": 0.6,
-      "f1": 0.4864864865,
+      "f1": 0.5,
       "support": 15,
-      "predicted": 22
+      "predicted": 21
     },
     {
       "state": "hand_raised",
-      "precision": null,
-      "recall": 0.0,
-      "f1": null,
+      "precision": 0.5,
+      "recall": 0.3333333333,
+      "f1": 0.4,
       "support": 3,
-      "predicted": 0
+      "predicted": 2
     },
     {
       "state": "head_down",
@@ -99,7 +99,7 @@
       "boxes": "large (front)",
       "px": "136\u2013239",
       "n": 30,
-      "accuracy": 0.6,
+      "accuracy": 0.6333333333,
       "engaged_accuracy": 0.8
     }
   ]

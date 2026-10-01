@@ -52,6 +52,7 @@ from .headpose import shoulder_anchor, shoulder_width
 from .identity import (
     FaceBlurrer, Gallery, SeatIdentifier, blur_heads, head_box, load_seating_chart, outside_all, save_identities,
 )
+from .refine import GATES, refine_frames
 from .seatmap import SeatMap, SeatTracker
 from .states import ClassifierConfig, PersonObs, StateClassifier, TemporalSmoother
 from .tokens import ENGAGED_STATES, ClassroomToken, Role, StudentState
@@ -195,7 +196,7 @@ def run_reasoning(
 ) -> list[ClassroomToken]:
     seat_tracker = SeatTracker()
     classifier = StateClassifier(seatmap, ClassifierConfig())
-    smoother = TemporalSmoother(window=smooth_frames)
+    smoother = TemporalSmoother(window=smooth_frames, event_window=max(1, round(smooth_frames / 3)))
     tokens: list[ClassroomToken] = []
 
     for det in frames:
@@ -399,6 +400,23 @@ def identify_seats(args, frames: list[FrameDetections], tokens: list[ClassroomTo
     return seat_students
 
 
+def refined_detections(args, frames: list[FrameDetections], perception_key: dict, out: Path, device: str):
+    """Crop-level pose refinement (classroom/refine.py), cached separately per gate."""
+    key = {**perception_key, "refine_pose": args.refine_pose}
+    cache = out / f"detections_refined_{args.refine_pose}.pkl"
+    cached = load_cached_detections(cache, key)
+    if cached is not None:
+        logger.info(f"Reusing refined detections from {cache}")
+        return cached
+    from ultralytics import YOLO
+    started = time.time()
+    stats = refine_frames(args.video, frames, YOLO(args.pose_model), gate=args.refine_pose, device=device)
+    logger.info(f"Pose refinement ({args.refine_pose}): {stats} in {time.time() - started:.0f}s")
+    with cache.open("wb") as f:
+        pickle.dump({"key": key, "frames": frames}, f)
+    return frames
+
+
 def load_cached_detections(cache: Path, key: dict) -> Optional[list[FrameDetections]]:
     """Pass-1 results from a previous run with identical perception settings (local, self-written file)."""
     if not cache.exists():
@@ -424,6 +442,8 @@ def main(argv: Optional[list[str]] = None) -> None:
     parser.add_argument("--calib-seconds", type=float, default=300.0, help="Seat-map learning window")
     parser.add_argument("--smooth-seconds", type=float, default=3.0)
     parser.add_argument("--max-seconds", type=float, default=None)
+    parser.add_argument("--refine-pose", choices=["off", *GATES], default="off",
+                        help="Re-run pose on upscaled crops of these students (arms: weak arm keypoints)")
     parser.add_argument("--preview", action="store_true")
     parser.add_argument("--consent", type=Path, default=Path("data/consent/registry.csv"))
     parser.add_argument("--gallery", type=Path, default=Path("data/faces/gallery.enc"))
@@ -454,6 +474,8 @@ def main(argv: Optional[list[str]] = None) -> None:
             pickle.dump({"key": perception_key, "frames": frames}, f)
     else:
         logger.info(f"Reusing cached detections from {cache}")
+    if args.refine_pose != "off":
+        frames = refined_detections(args, frames, perception_key, out, device)
     perception_s = time.time() - t0
     if not frames:
         sys.exit("No frames read")

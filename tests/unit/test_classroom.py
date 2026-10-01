@@ -163,6 +163,12 @@ class TestStateRules:
         kp[9] = [138, 62, 0.9]              # left wrist above shoulders, beside the face (nose at x=100)
         assert classify(kp) == StudentState.HAND_RAISED
 
+    def test_arms_around_head_on_desk_is_not_a_raise(self):
+        kp = seated_keypoints(nose_dy=36)   # head down on the desk: nose below the shoulder line
+        kp[9] = [115, 88, 0.9]              # wrists up beside the lowered head
+        kp[10] = [85, 88, 0.9]
+        assert classify(kp) != StudentState.HAND_RAISED
+
     def test_hand_on_chin_is_not_a_raise(self):
         kp = seated_keypoints()
         kp[7] = [120, 125, 0.9]             # elbow down on the desk
@@ -227,6 +233,15 @@ class TestSmoothingAndAggregation:
         for s in [StudentState.ATTENTIVE] * 4 + [StudentState.TURNED_AWAY]:
             state, share = sm.update(1, s)
         assert state == StudentState.ATTENTIVE and share == 0.8
+
+    def test_brief_hand_raise_survives_smoothing(self):
+        sm = TemporalSmoother(window=9, event_window=3)
+        for s in [StudentState.ATTENTIVE] * 6 + [StudentState.HAND_RAISED]:
+            state, _ = sm.update(1, s)
+        assert state == StudentState.HAND_RAISED
+        for _ in range(3):                               # gone after the event window passes
+            state, _ = sm.update(1, StudentState.ATTENTIVE)
+        assert state == StudentState.ATTENTIVE
 
     def test_phone_in_hands(self):
         kps = seated_keypoints()

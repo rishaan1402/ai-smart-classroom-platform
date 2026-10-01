@@ -63,6 +63,7 @@ class ClassifierConfig:
     camera_baseline_min_samples: int = 50
     face_hidden_visibility: float = 0.25  # face keypoints this weak + shoulders → head down
     hand_raise_margin: float = 0.0        # wrist above nose by this many shoulder widths
+    raise_min_head_lift: float = 0.2      # nose must be this far above the shoulder line for any raise
     face_level_wrist_lift: float = 0.3    # face-level raise: wrist this far above the shoulder line
     face_level_elbow_drop: float = 0.6    # …elbow no lower than this below the shoulder line
     face_level_side_offset: float = 0.5   # …wrist this far sideways from the nose (not on the chin)
@@ -223,12 +224,16 @@ class StateClassifier:
         nose_x, nose_y = kps[KP_NOSE, 0], kps[KP_NOSE, 1]
         shoulders = [s for s in (KP_LEFT_SHOULDER, KP_RIGHT_SHOULDER) if kps[s, 2] >= KP_CONF]
         shoulder_y = float(np.mean(kps[shoulders, 1])) if shoulders else None
+        # Head resting on the arms puts the nose below the wrists; that's not a raise
+        if shoulder_y is not None and nose_y > shoulder_y - cfg.raise_min_head_lift * scale:
+            return False
 
         for wrist, elbow in ((KP_LEFT_WRIST, KP_LEFT_ELBOW), (KP_RIGHT_WRIST, KP_RIGHT_ELBOW)):
             if kps[wrist, 2] < KP_CONF:
                 continue
             wx, wy = kps[wrist, 0], kps[wrist, 1]
-            if wy < nose_y - cfg.hand_raise_margin * scale:
+            above_shoulders = shoulder_y is None or wy < shoulder_y
+            if wy < nose_y - cfg.hand_raise_margin * scale and above_shoulders:
                 return True
             # Face-level raise (small children): hand up beside the face, elbow lifted
             if (
@@ -299,41 +304,33 @@ class StateClassifier:
 
 
 class TemporalSmoother:
-    """Majority vote over the last `window` states of each track."""
+    """
+    Majority vote over the last `window` states of each track, except for
+    brief events: a hand raise lasts about a second, so a 3 s majority vote
+    erases it. An event state wins if it appears in the last `event_window`
+    frames at least `event_min_hits` times.
+    """
 
-    def __init__(self, window: int = 9) -> None:
+    EVENTS = (StudentState.HAND_RAISED,)
+
+    def __init__(self, window: int = 9, event_window: int = 3, event_min_hits: int = 1) -> None:
         self._history: dict[int, deque] = defaultdict(lambda: deque(maxlen=window))
+        self.event_window = event_window
+        self.event_min_hits = event_min_hits
 
     def update(self, track_id: int, state: StudentState) -> tuple[StudentState, float]:
         history = self._history[track_id]
         history.append(state)
+        recent = list(history)[-self.event_window:]
+        for event in self.EVENTS:
+            hits = sum(s == event for s in recent)
+            if hits >= self.event_min_hits:
+                return event, hits / len(recent)
         known = [s for s in history if s != StudentState.UNKNOWN]
         if not known:
             return StudentState.UNKNOWN, 0.0
         winner, votes = Counter(known).most_common(1)[0]
         return winner, votes / len(history)
-
-    def _local_consensus(self, students: list[PersonObs], heads: dict[int, HeadPose]) -> dict[int, float]:
-        """Median yaw of each student's nearest valid seated classmates (0.0 if too few)."""
-        valid = [
-            p for p in students
-            if p.seated_now and heads[p.track_id].yaw is not None
-            and heads[p.track_id].confidence >= self.cfg.min_head_confidence
-        ]
-        if len(valid) < 3:
-            return {p.track_id: 0.0 for p in students}
-        centres = np.array([[(p.bbox[0] + p.bbox[2]) / 2, (p.bbox[1] + p.bbox[3]) / 2] for p in valid])
-        yaws = np.array([heads[p.track_id].yaw for p in valid])
-        k = min(self.cfg.consensus_neighbours, len(valid) - 1)
-
-        consensus = {}
-        for p in students:
-            me = np.array([(p.bbox[0] + p.bbox[2]) / 2, (p.bbox[1] + p.bbox[3]) / 2])
-            dist = np.linalg.norm(centres - me, axis=1)
-            dist[[q.track_id == p.track_id for q in valid]] = np.inf   # exclude self
-            nearest = np.argsort(dist)[:k]
-            consensus[p.track_id] = float(np.median(yaws[nearest]))
-        return consensus
 
     def forget(self, active_ids: set[int]) -> None:
         for tid in set(self._history) - active_ids:

@@ -43,6 +43,24 @@ Scored with `labeling.evaluate --repredict` against the same 141 provisional lab
 
 Altima is unchanged (27%); its errors are the top-down writing confusion, which these fixes don't touch.
 
+## Crop-level pose refinement + hand-raise follow-up
+`classroom/refine.py` re-runs the pose model on each student's crop upscaled to 320 px and merges joints (the more confident estimate wins). Pipeline flag: `--refine-pose arms|small|all` (cached per gate).
+
+What the experiment showed:
+- **In isolation it works**: on task 82 the raised wrist that full-frame pose lost (confidence 0.26) is recovered (0.71) at nose height.
+- **It can't separate a face-level wave from a chin rest**: task 53 (waving) and task 9 (same child, chin on hands) give near-identical keypoints. That needs hand appearance (a learned crop classifier), not pose.
+- **The real blocker was smoothing**: the raw per-frame state did flag task 82's raise, but the 3 s majority vote erased it. `TemporalSmoother` now treats `hand_raised` as an event: it wins if it appears in the last ~1 s.
+- That surfaced **head-down false positives** (head resting on the arms puts the nose below the wrists). A raise now requires the nose above the shoulder line and the wrist above the shoulders.
+
+| Securus | Before | Event smoothing + head-up guard | + `--refine-pose arms` |
+|---|---|---|---|
+| Hand raise recall | 0/3 | **1/3** | 1/3 |
+| Hand raise precision | — | **1/2** | 1/2 |
+| State accuracy | 64% | 65% | 66% |
+| Extra runtime (2-min clip, M4) | — | — | +46 s |
+
+Altima: 27% with or without refinement. **Decision: refinement stays available but off by default**; on this data it costs ~40% of real time for a one-task difference. Revisit with human labels and more raises in the sample (3 is far too few to measure recall).
+
 ## Privacy notes found while labelling
 - Top-down views: faces looking straight down are not detected, so some partial faces in Altima strips are not pixelated. Strips are for authorized internal labellers only. Before using pilot footage, add a top-of-head blur for steep cameras or review strips before release.
 - Labelling students' footage for model improvement is a **separate consent purpose**. Add it to the consent form; only export lessons whose students consented to it.
