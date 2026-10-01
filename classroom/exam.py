@@ -80,6 +80,8 @@ class ExamFlag:
     evidence: dict = field(default_factory=dict)
     student_id: Optional[str] = None
     clip: Optional[str] = None
+    vlm: Optional[dict] = None      # classroom/vlm_verify.py second opinion
+    priority: Optional[float] = None  # score adjusted by the VLM verdict (= score without VLM)
 
     def to_dict(self) -> dict:
         return asdict(self)

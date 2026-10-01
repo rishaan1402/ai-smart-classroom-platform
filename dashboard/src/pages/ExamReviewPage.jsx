@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { AlertTriangle, ArrowLeft, Check, EyeOff, HelpCircle, Info, X } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Bot, Check, EyeOff, HelpCircle, Info, X } from 'lucide-react'
 import { api } from '../api'
 import { clock } from '../lib/format'
 
@@ -28,17 +28,20 @@ export default function ExamReviewPage() {
   const [error, setError] = useState(null)
   const [selected, setSelected] = useState(null)
   const [filter, setFilter] = useState('all')
+  const [showCleared, setShowCleared] = useState(false)
   const [note, setNote] = useState('')
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     api.exam(id).then((d) => {
       setData(d)
-      setSelected(d.flags.find((f) => !f.review)?.id ?? d.flags[0]?.id ?? null)
+      setSelected(d.flags.find((f) => !f.review && f.vlm?.verdict !== 'normal')?.id ?? d.flags[0]?.id ?? null)
     }).catch((e) => setError(e.message))
   }, [id])
 
-  const flags = useMemo(() => (data?.flags ?? []).filter((f) => filter === 'all' || f.type === filter), [data, filter])
+  const cleared = (f) => f.vlm?.verdict === 'normal'
+  const flags = useMemo(() => (data?.flags ?? []).filter((f) =>
+    (filter === 'all' || f.type === filter) && (showCleared || !cleared(f))), [data, filter, showCleared])
   const flag = data?.flags.find((f) => f.id === selected)
   const reviewed = data?.flags.filter((f) => f.review).length ?? 0
 
@@ -90,8 +93,9 @@ export default function ExamReviewPage() {
         </span>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
         <Tile label="Flags" value={s.flags} />
+        <Tile label="Queue after VLM" value={s.queue_after_vlm ?? '—'} />
         <Tile label="High priority" value={s.high_priority ?? '—'} />
         <Tile label="Reviewed" value={`${reviewed} / ${data.flags.length}`} />
         <Tile label="Per student-hour" value={s.flags_per_student_hour ?? '—'} />
@@ -105,6 +109,12 @@ export default function ExamReviewPage() {
             {t === 'all' ? `All (${data.flags.length})` : `${TYPE_LABELS[t] ?? t} (${s.by_type[t]})`}
           </button>
         ))}
+        {s.vlm && (
+          <label className="ml-auto flex items-center gap-2 text-slate-300">
+            <input type="checkbox" checked={showCleared} onChange={(e) => setShowCleared(e.target.checked)} />
+            Show {s.vlm.normal} flags the VLM judged normal
+          </label>
+        )}
       </div>
 
       <div className="grid gap-4 lg:grid-cols-5">
@@ -119,6 +129,7 @@ export default function ExamReviewPage() {
                 </div>
                 <div className="text-xs text-slate-400 mt-0.5">
                   {f.student_id || `Seat ${f.seat_id}`} · {clock(f.start_s)}–{clock(f.end_s)} · score {f.score.toFixed(2)}
+                  {f.vlm && <span className={`ml-1 ${VLM_STYLE[f.vlm.verdict]}`}>· VLM {f.vlm.verdict}</span>}
                 </div>
               </button>
             </li>
@@ -144,6 +155,20 @@ export default function ExamReviewPage() {
               <div className="text-slate-400">
                 {clock(flag.start_s)}–{clock(flag.end_s)} · {flag.evidence.duration_s} s sustained · score {flag.score.toFixed(2)}
               </div>
+              {flag.vlm && (
+                <div className="flex gap-1.5 text-slate-300 pt-1">
+                  <Bot size={14} className="mt-0.5 flex-shrink-0 text-slate-500" />
+                  <span>
+                    VLM ({flag.vlm.model}): <span className={VLM_STYLE[flag.vlm.verdict]}>{flag.vlm.verdict}</span>
+                    {flag.vlm.description ? `: ${flag.vlm.description}` : ''}
+                    {flag.vlm.disagree && (
+                      <span className="block text-xs text-amber-300 mt-0.5">
+                        The VLM's own label ({flag.vlm.vlm_activity?.replace(/_/g, ' ')}) disagreed with its description; verdict follows the description.
+                      </span>
+                    )}
+                  </span>
+                </div>
+              )}
               {flag.review && (
                 <div className="text-slate-400">Last review: {flag.review.decision}{flag.review.note ? ` ("${flag.review.note}")` : ''}</div>
               )}
@@ -172,6 +197,8 @@ export default function ExamReviewPage() {
     </div>
   )
 }
+
+const VLM_STYLE = { suspicious: 'text-red-300', normal: 'text-slate-400', unclear: 'text-amber-300' }
 
 function ReviewBadge({ review }) {
   if (!review) return <span className="text-xs text-slate-500">to review</span>

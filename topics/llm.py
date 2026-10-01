@@ -18,25 +18,33 @@ DEFAULT_MODEL = "qwen3:8b"
 
 
 class OllamaClient:
-    def __init__(self, model: str = DEFAULT_MODEL, url: str = DEFAULT_URL, timeout_s: int = 300) -> None:
+    def __init__(
+        self, model: str = DEFAULT_MODEL, url: str = DEFAULT_URL, timeout_s: int = 300, think: Optional[bool] = False,
+    ) -> None:
         self.model = model
         self.url = url.rstrip("/")
         self.timeout_s = timeout_s
+        # qwen3: False skips the reasoning trace (we only want the JSON).
+        # None omits the field, for models without a thinking mode (e.g. qwen2.5vl).
+        self.think = think
 
-    def chat_json(self, system: str, user: str, schema: dict, temperature: float = 0.1) -> dict:
-        """Return the model's reply parsed as JSON, constrained to `schema`."""
-        resp = requests.post(
-            f"{self.url}/api/chat",
-            json={
-                "model": self.model,
-                "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
-                "format": schema,
-                "stream": False,
-                "think": False,          # qwen3: skip the reasoning trace, we only want the JSON
-                "options": {"temperature": temperature, "num_ctx": 16384},
-            },
-            timeout=self.timeout_s,
-        )
+    def chat_json(
+        self, system: str, user: str, schema: dict, temperature: float = 0.1, images: Optional[list[str]] = None,
+    ) -> dict:
+        """Return the model's reply parsed as JSON, constrained to `schema`. `images`: base64 JPEG/PNG."""
+        user_msg = {"role": "user", "content": user}
+        if images:
+            user_msg["images"] = images
+        body = {
+            "model": self.model,
+            "messages": [{"role": "system", "content": system}, user_msg],
+            "format": schema,
+            "stream": False,
+            "options": {"temperature": temperature, "num_ctx": 16384},
+        }
+        if self.think is not None:
+            body["think"] = self.think
+        resp = requests.post(f"{self.url}/api/chat", json=body, timeout=self.timeout_s)
         resp.raise_for_status()
         content = resp.json()["message"]["content"]
         parsed = parse_json(content)

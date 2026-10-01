@@ -416,6 +416,17 @@ def write_exam_outputs(
     flags = exam.finish()
     for f in flags:
         f.student_id = seat_students.get(f.seat_id)
+        f.priority = f.score
+
+    vlm_stats = None
+    if args.vlm_verify:
+        from topics.llm import OllamaClient
+        from .vlm_verify import verify_flags
+        logger.info(f"VLM verification with {args.vlm_model} (top {args.vlm_limit})")
+        vlm_stats = verify_flags(args.video, flags, frames, seatmap,
+                                 OllamaClient(args.vlm_model, think=None, timeout_s=180), limit=args.vlm_limit,
+                                 check_client=OllamaClient("qwen3:8b", think=False, timeout_s=120))
+        flags.sort(key=lambda f: (-(f.priority or 0), f.start_s))
 
     room_flags: list[dict] = []
     audio = load_audio(args.video)
@@ -431,6 +442,12 @@ def write_exam_outputs(
         f.clip = f"flags/{f.id}.mp4"
 
     summary = {**exam.summary(flags), "room_flags": len(room_flags), "clips": min(len(flags), args.max_clips)}
+    if vlm_stats is not None:
+        queue = [f for f in flags if not (f.vlm and f.vlm["verdict"] == "normal")]
+        hours = summary["student_hours"]
+        summary["vlm"] = {**vlm_stats, "model": args.vlm_model}
+        summary["queue_after_vlm"] = len(queue)
+        summary["queue_per_student_hour"] = round(len(queue) / hours, 2) if hours else None
     (out / "exam_flags.json").write_text(json.dumps(
         {"flags": [f.to_dict() for f in flags], "room": room_flags}, indent=1))
     (out / "exam_summary.json").write_text(json.dumps(summary, indent=2))
@@ -542,6 +559,9 @@ def main(argv: Optional[list[str]] = None) -> None:
     parser.add_argument("--purpose", choices=["engagement", "exam"], default=None,
                         help="Consent purpose for identity (default: exam in exam mode, else engagement)")
     parser.add_argument("--max-clips", type=int, default=40)
+    parser.add_argument("--vlm-verify", action="store_true", help="Second opinion on exam flags from a local VLM")
+    parser.add_argument("--vlm-model", default="qwen2.5vl:7b")
+    parser.add_argument("--vlm-limit", type=int, default=60, help="Verify at most this many top flags")
     parser.add_argument("--allow-calculators", action="store_true",
                         help="Exam allows calculators: don't raise device flags (COCO phones include calculators)")
     parser.add_argument("--audit", type=Path, default=Path("data/audit/audit.jsonl"))
