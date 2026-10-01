@@ -1,9 +1,10 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAuth } from '../AuthContext'
-import { Activity, BookOpen, Camera, Film, GraduationCap, LogOut, Wifi } from 'lucide-react'
+import { Activity, BookOpen, Camera, Film, GraduationCap, LogOut, Tag, Wifi } from 'lucide-react'
 
 const nav = [
   { to: '/lessons', icon: BookOpen, label: 'Lessons' },
+  { to: '/label', icon: Tag, label: 'Label' },
   { to: '/events', icon: Activity, label: 'Events' },
   { to: '/cameras', icon: Camera, label: 'Cameras' },
   { to: '/playback', icon: Film, label: 'Playback' },

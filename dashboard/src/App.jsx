@@ -8,6 +8,7 @@ import PlaybackPage from './pages/PlaybackPage'
 import LessonsPage from './pages/LessonsPage'
 import LessonPage from './pages/LessonPage'
 import StudentPage from './pages/StudentPage'
+import LabelPage from './pages/LabelPage'
 import Layout from './components/Layout'
 
 function RequireAuth({ children }) {
@@ -32,6 +33,8 @@ export default function App() {
             <Route path="lessons" element={<LessonsPage />} />
             <Route path="lessons/:id" element={<LessonPage />} />
             <Route path="students/:id" element={<StudentPage />} />
+            <Route path="label" element={<LabelPage />} />
+            <Route path="label/:lesson" element={<LabelPage />} />
             <Route path="events" element={<EventsPage />} />
             <Route path="cameras" element={<CamerasPage />} />
             <Route path="playback" element={<PlaybackPage />} />

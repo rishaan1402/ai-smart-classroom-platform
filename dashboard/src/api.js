@@ -63,4 +63,11 @@ export const api = {
   seats: (id) => request('GET', `/lessons/${encodeURIComponent(id)}/seats`),
   previewUrl: (id) => `${BASE}/lessons/${encodeURIComponent(id)}/preview`,
   student: (id) => request('GET', `/students/${encodeURIComponent(id)}`),
+
+  // Labelling
+  labelingSets: () => request('GET', '/labeling'),
+  labelingNext: (lesson) => request('GET', `/labeling/${encodeURIComponent(lesson)}/next`),
+  labelingCropUrl: (lesson, taskId) => `${BASE}/labeling/${encodeURIComponent(lesson)}/crops/${encodeURIComponent(taskId)}`,
+  submitLabel: (lesson, taskId, label) =>
+    request('POST', `/labeling/${encodeURIComponent(lesson)}/labels`, { task_id: taskId, label }),
 }

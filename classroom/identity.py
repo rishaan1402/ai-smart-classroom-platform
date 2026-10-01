@@ -273,6 +273,26 @@ def blur_heads(frame: np.ndarray, boxes: list[tuple[float, float, float, float]]
     return frame
 
 
+def pixelate_regions(frame: np.ndarray, boxes: list[tuple[float, float, float, float]], blocks: int = 7) -> np.ndarray:
+    """
+    Coarse mosaic over each box, in place. Removes identity at classroom-CCTV
+    resolution while keeping head orientation readable (hair vs. face layout),
+    which labellers need to judge attentive vs. turned away.
+    """
+    h, w = frame.shape[:2]
+    for x1, y1, x2, y2 in boxes:
+        x1, y1 = max(0, int(x1)), max(0, int(y1))
+        x2, y2 = min(w, int(x2)), min(h, int(y2))
+        if x2 - x1 < 2 or y2 - y1 < 2:
+            continue
+        roi = frame[y1:y2, x1:x2]
+        bw = max(1, blocks)
+        bh = max(1, round(blocks * roi.shape[0] / roi.shape[1]))
+        small = cv2.resize(roi, (bw, bh), interpolation=cv2.INTER_AREA)
+        frame[y1:y2, x1:x2] = cv2.resize(small, (roi.shape[1], roi.shape[0]), interpolation=cv2.INTER_NEAREST)
+    return frame
+
+
 class FaceBlurrer:
     """
     Whole-frame face detection for exports, so a face the person detector
