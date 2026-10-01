@@ -18,9 +18,12 @@ back as its description (acquiescence bias).
 Even with the neutral prompt, the chosen activity sometimes contradicts the
 model's own description ("looking down at their table" labelled
 looking_towards_neighbour). The description, written before the label, is
-more grounded, so a text LLM (check_client, default qwen3:8b) re-reads each
-description and picks the activity it explicitly supports; the verdict comes
-from that reading. Both labels are kept, and disagreements are marked.
+more grounded, so a text LLM (check_client, default qwen3:8b) re-reads the
+description of every flag the VLM labelled suspicious and picks the activity
+the description supports; the verdict follows that reading. The check only
+ever re-examines suspicious labels: run on every flag, it answered
+"cannot tell" even for clear "holding a pen, writing" descriptions and
+cleared nothing. Both labels are kept, and disagreements are marked.
 
 The VLM never removes a flag. "normal" lowers its priority so it drops out
 of the default queue, but invigilators can still see and review it, and the
@@ -81,11 +84,12 @@ SCHEMA = {
 
 CHECK_SYSTEM = """\
 You read an observer's description of one student during an exam and choose the activity the \
-description EXPLICITLY supports. Choose a suspicious activity (looking towards a neighbour, talking, \
-passing an object, using a phone, turned around, standing) only if the description actually says \
-so, for example the student looks at another person, at someone else's paper or object, or to the \
-side at a neighbour. Looking down at their own desk, paper, hands or lap is NOT suspicious. If the \
-description is too vague, choose cannot_tell. Return JSON only."""
+description supports. Choose a suspicious activity (looking towards a neighbour, talking, passing \
+an object, using a phone, turned around, standing) only if the description says so, for example \
+the student looks at another person, at someone else's paper or object, or to the side. If it says \
+the student looks down at their own desk, paper, book, hands or lap, choose the matching ordinary \
+activity (writing_on_own_paper, reading_own_paper or handling_own_items). Choose cannot_tell only if \
+the description gives no usable information. Return JSON only."""
 
 CHECK_SCHEMA = {
     "type": "object",
@@ -146,19 +150,26 @@ def _square_crop(frame: np.ndarray, region: list[float]) -> np.ndarray:
 
 
 def verify_flags(video, flags: list, frames, seatmap, client: Optional[OllamaClient] = None,
-                 limit: Optional[int] = None, check_client: Optional[OllamaClient] = None) -> dict:
+                 limit: Optional[int] = None, check_client: Optional[OllamaClient] = None,
+                 reuse_vlm: bool = False) -> dict:
     """
     Attach flag.vlm and flag.priority; returns stats. Flags beyond `limit` keep their rule score.
 
     VLM calls run first for every flag, then the description check (if
     check_client is given) for all of them, so Ollama doesn't swap models
-    between each call.
+    between each call. reuse_vlm keeps existing VLM descriptions/labels and
+    only re-runs the description check.
     """
     client = client or OllamaClient(DEFAULT_VLM, think=None, timeout_s=180)
     stats = {v: 0 for v in VERDICTS} | {"errors": 0, "seconds": 0.0, "label_description_disagree": 0}
     for i, flag in enumerate(flags):
         flag.priority = flag.score
         if limit is not None and i >= limit:
+            continue
+        if reuse_vlm and flag.vlm:
+            flag.vlm = {k: v for k, v in flag.vlm.items() if k not in ("description_activity", "disagree", "check_model")}
+            flag.vlm["activity"] = flag.vlm["vlm_activity"]
+            flag.vlm["verdict"] = verdict_for(flag.vlm["vlm_activity"])
             continue
         strip = flag_strip(video, flag, frames, seatmap)
         if strip is None:
@@ -188,7 +199,7 @@ def verify_flags(video, flags: list, frames, seatmap, client: Optional[OllamaCli
 
     if check_client is not None:
         for flag in flags:
-            if not flag.vlm or not flag.vlm["description"]:
+            if not flag.vlm or not flag.vlm["description"] or verdict_for(flag.vlm["vlm_activity"]) != "suspicious":
                 continue
             try:
                 checked = check_client.chat_json(CHECK_SYSTEM, flag.vlm["description"], CHECK_SCHEMA, temperature=0.0)
@@ -227,19 +238,21 @@ def main(argv: Optional[list[str]] = None) -> None:
     parser.add_argument("--model", default=DEFAULT_VLM)
     parser.add_argument("--limit", type=int, default=60)
     parser.add_argument("--check-model", default="qwen3:8b", help="Text LLM that re-reads descriptions ('' to skip)")
+    parser.add_argument("--check-only", action="store_true", help="Keep stored VLM outputs; re-run only the check")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
 
     doc = json.loads((args.lesson / "exam_flags.json").read_text())
     flags = [ExamFlag(**{k: v for k, v in f.items() if k in ExamFlag.__dataclass_fields__}) for f in doc["flags"]]
-    for f in flags:
-        f.vlm = None
+    if not args.check_only:
+        for f in flags:
+            f.vlm = None
     frames = pickle.load(open(args.lesson / "detections.pkl", "rb"))["frames"]
     seatmap = SeatMap.from_json(args.lesson / "seatmap.json")
     flags.sort(key=lambda f: (-f.score, f.start_s))
     check = OllamaClient(args.check_model, think=False, timeout_s=120) if args.check_model else None
     stats = verify_flags(args.video, flags, frames, seatmap, OllamaClient(args.model, think=None, timeout_s=180),
-                         limit=args.limit, check_client=check)
+                         limit=args.limit, check_client=check, reuse_vlm=args.check_only)
     flags.sort(key=lambda f: (-(f.priority or 0), f.start_s))
 
     doc["flags"] = [f.to_dict() for f in flags]

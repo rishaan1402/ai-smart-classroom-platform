@@ -83,6 +83,24 @@ def test_description_check_overrides_inconsistent_label(video):
     assert check.calls[0][0] == "looking down at their own table"
 
 
+def test_check_only_reexamines_suspicious_labels(video):
+    flags = [flag("F1"), flag("F2")]
+    vlm = FakeVLM([
+        {"description": "holding a pen, writing", "activity": "writing_on_own_paper"},
+        {"description": "looking at own hands", "activity": "looking_towards_neighbour"},
+    ])
+    check = FakeVLM([{"activity": "handling_own_items"}])
+    check.model = "fake-text"
+    verify_flags(video, flags, frames(), seatmap(), vlm, check_client=check)
+    assert len(check.calls) == 1 and check.calls[0][0] == "looking at own hands"   # normal label left alone
+    assert [f.vlm["verdict"] for f in flags] == ["normal", "normal"]
+
+    recheck = FakeVLM([{"activity": "looking_towards_neighbour"}])
+    recheck.model = "fake-text"
+    verify_flags(video, flags, frames(), seatmap(), FakeVLM([]), check_client=recheck, reuse_vlm=True)
+    assert [f.vlm["verdict"] for f in flags] == ["normal", "suspicious"]         # no VLM calls needed
+
+
 def test_verdict_mapping():
     assert verdict_for("using_calculator") == "normal"
     assert verdict_for("using_phone") == "suspicious"
